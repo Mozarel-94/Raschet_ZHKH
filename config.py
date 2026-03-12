@@ -39,7 +39,10 @@ class AppConfig:
     """Application-level settings."""
 
     service_account_file: str = os.getenv("SERVICE_ACCOUNT_FILE", "service_account.json")
+<<<<<<< codex/deploy-web-service-to-github-server-dxqw8h
     service_account_json: str = os.getenv("SERVICE_ACCOUNT_JSON", "")
+=======
+>>>>>>> main
 
 
 SHEET_CONFIG = SheetConfig()
