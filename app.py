@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from html import escape
 from typing import Dict, Optional
 from urllib.parse import parse_qs
@@ -16,8 +17,8 @@ from sheets_service import (
     readings_to_dict,
 )
 
-HOST = "0.0.0.0"
-PORT = 8501
+HOST = os.getenv("HOST", "0.0.0.0")
+PORT = int(os.getenv("PORT", "8501"))
 ENCODING = "utf-8"
 
 
@@ -136,6 +137,10 @@ def _render_html(
 
 
 def application(environ, start_response):
+    if environ.get("PATH_INFO") == "/health":
+        start_response("200 OK", [("Content-Type", f"text/plain; charset={ENCODING}")])
+        return ["ok".encode(ENCODING)]
+
     readings = None
     water_total = ""
     electricity_total = ""

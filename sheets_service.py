@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import atexit
+import os
+import tempfile
 import time
 from dataclasses import dataclass
 from typing import Dict
@@ -43,8 +46,32 @@ class CalculationResult:
 class SheetsService:
     """Service for writing readings and fetching totals from Google Sheets."""
 
-    def __init__(self, service_account_file: str = APP_CONFIG.service_account_file) -> None:
+    def __init__(
+        self,
+        service_account_file: str = APP_CONFIG.service_account_file,
+        service_account_json: str = APP_CONFIG.service_account_json,
+    ) -> None:
         self._service_account_file = service_account_file
+        self._service_account_json = service_account_json
+        self._temp_credentials_file: str | None = None
+
+    def _cleanup_temp_credentials(self) -> None:
+        if self._temp_credentials_file and os.path.exists(self._temp_credentials_file):
+            os.remove(self._temp_credentials_file)
+
+    def _resolve_service_account_file(self) -> str:
+        if self._service_account_json.strip():
+            temp_file = tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", suffix=".json", delete=False
+            )
+            temp_file.write(self._service_account_json)
+            temp_file.flush()
+            temp_file.close()
+            self._temp_credentials_file = temp_file.name
+            atexit.register(self._cleanup_temp_credentials)
+            return temp_file.name
+
+        return self._service_account_file
 
     def _get_worksheet(self):
         try:
@@ -55,13 +82,15 @@ class SheetsService:
                 "Пакет gspread не установлен. Установите зависимости из requirements.txt."
             ) from error
 
+        service_account_file = self._resolve_service_account_file()
+
         try:
-            client = gspread.service_account(filename=self._service_account_file)
+            client = gspread.service_account(filename=service_account_file)
             spreadsheet = client.open_by_key(SHEET_CONFIG.spreadsheet_id)
             return spreadsheet.worksheet(SHEET_CONFIG.worksheet_name)
         except FileNotFoundError as error:
             raise SheetsConnectionError(
-                f"Файл ключа service account не найден: {self._service_account_file}"
+                f"Файл ключа service account не найден: {service_account_file}"
             ) from error
         except SpreadsheetNotFound as error:
             raise SheetsConnectionError(
