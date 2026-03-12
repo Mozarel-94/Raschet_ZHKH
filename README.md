@@ -39,22 +39,3 @@ streamlit run app.py
 ## Почему не GitHub Pages
 
 GitHub Pages публикует только статические сайты. Streamlit-приложению нужен Python runtime, поэтому его нужно деплоить на Streamlit Cloud или другой backend-хостинг.
-
-
-## Troubleshooting Streamlit Cloud
-
-### Ошибка с `make_server(...)` / `socket.bind` в логах
-Если в логе есть traceback c `make_server(HOST, PORT, application)`, это значит, что в деплой попала **старая версия** (WSGI), а не текущий Streamlit-код.
-
-Что сделать:
-1. Проверьте в Streamlit Cloud:
-   - **Repository**: `mozarel-94/Raschet_ZHKH`
-   - **Branch**: актуальная ветка, куда запушен последний коммит
-   - **Main file path**: `app.py`
-2. В меню приложения нажмите **Manage app → Reboot app**.
-3. Если не помогло — **Delete app** и создайте заново с теми же параметрами.
-4. Убедитесь, что в открываемом `app.py` нет `make_server` и `serve_forever`.
-
-### Ошибка авторизации Google Sheets
-- Проверьте, что в Secrets добавлены `SPREADSHEET_ID` и блок `[gcp_service_account]` из шаблона `.streamlit/secrets.toml.example`.
-- Убедитесь, что таблица расшарена на `client_email` сервисного аккаунта.
