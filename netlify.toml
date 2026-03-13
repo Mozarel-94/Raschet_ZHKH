@@ -2,6 +2,9 @@
   publish = "web"
   functions = "netlify/functions"
 
+[build.environment]
+  NODE_VERSION = "20"
+
 [[redirects]]
   from = "/api/month"
   to = "/.netlify/functions/month"
