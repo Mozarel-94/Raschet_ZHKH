@@ -1,0 +1,13 @@
+[build]
+  publish = "web"
+  functions = "netlify/functions"
+
+[[redirects]]
+  from = "/api/month"
+  to = "/.netlify/functions/month"
+  status = 200
+
+[[redirects]]
+  from = "/api/calculate"
+  to = "/.netlify/functions/calculate"
+  status = 200
