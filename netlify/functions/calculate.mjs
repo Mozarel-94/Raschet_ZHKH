@@ -71,6 +71,9 @@ export async function handler(event) {
       message: `Показания за ${monthKey} сохранены.`,
     });
   } catch (error) {
-    return json(400, { error: error instanceof Error ? error.message : "Ошибка расчёта." });
+    return json(400, {
+      error: error instanceof Error ? error.message : "Ошибка расчёта.",
+      code: "CALCULATION_FAILED",
+    });
   }
 }

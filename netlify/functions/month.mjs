@@ -35,6 +35,9 @@ export async function handler(event) {
       tariffs: getDefaultTariffs(),
     });
   } catch (error) {
-    return json(400, { error: error instanceof Error ? error.message : "Ошибка запроса." });
+    return json(400, {
+      error: error instanceof Error ? error.message : "Ошибка запроса.",
+      code: "MONTH_LOAD_FAILED",
+    });
   }
 }

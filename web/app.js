@@ -159,7 +159,10 @@ async function loadMonthData() {
   const payload = await response.json();
 
   if (!response.ok) {
-    setMessage("error", payload.error || "Не удалось загрузить данные месяца.");
+    setMessage(
+      "error",
+      payload.error || "Не удалось загрузить данные месяца."
+    );
     fillReadings(null);
     renderEmptyResults();
     return;
@@ -212,7 +215,10 @@ async function submitCalculation(event) {
   const result = await response.json();
 
   if (!response.ok) {
-    setMessage("error", result.error || "Не удалось выполнить расчёт.");
+    setMessage(
+      "error",
+      result.error || "Не удалось выполнить расчёт."
+    );
     return;
   }
 
