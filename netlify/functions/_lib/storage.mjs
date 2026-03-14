@@ -1,4 +1,3 @@
-import { seedData } from "./seed-data.mjs";
 import { getSupabaseAdmin } from "./supabase-admin.mjs";
 
 function mapRowToReadings(row) {
@@ -12,16 +11,6 @@ function mapRowToReadings(row) {
 }
 
 export function createStorageService({ supabase = getSupabaseAdmin() } = {}) {
-  async function upsertSeedMonth(userId, monthKey) {
-    const seedReadings = seedData[monthKey];
-    if (!seedReadings) {
-      return null;
-    }
-
-    await saveMonthReadings(userId, monthKey, seedReadings);
-    return seedReadings;
-  }
-
   async function getMonthReadings(userId, monthKey) {
     const { data, error } = await supabase
       .from("meter_readings")
@@ -38,7 +27,7 @@ export function createStorageService({ supabase = getSupabaseAdmin() } = {}) {
       return mapRowToReadings(data);
     }
 
-    return upsertSeedMonth(userId, monthKey);
+    return null;
   }
 
   async function saveMonthReadings(userId, monthKey, readings) {
