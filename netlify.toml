@@ -6,6 +6,11 @@
   NODE_VERSION = "20"
 
 [[redirects]]
+  from = "/api/auth-config"
+  to = "/.netlify/functions/auth-config"
+  status = 200
+
+[[redirects]]
   from = "/api/month"
   to = "/.netlify/functions/month"
   status = 200
@@ -13,4 +18,9 @@
 [[redirects]]
   from = "/api/calculate"
   to = "/.netlify/functions/calculate"
+  status = 200
+
+[[redirects]]
+  from = "/login"
+  to = "/login/index.html"
   status = 200

@@ -9,16 +9,31 @@
 <body>
   <div class="page-shell">
     <header class="hero-card">
-      <div class="eyebrow">Material Design 3</div>
-      <h1>Расчёт коммунальных платежей</h1>
-      <p>Выберите год и месяц, введите текущие показания и сохраните расчёт. Данные по месяцам хранятся в Supabase Postgres, поэтому после деплоя они сохраняются между запросами.</p>
+      <div class="hero-topbar">
+        <div>
+          <div class="eyebrow">Material Design 3</div>
+          <h1>Расчёт коммунальных платежей</h1>
+        </div>
+
+        <div class="auth-status">
+          <span id="user-email" class="auth-user"></span>
+          <button id="sign-out-button" class="subtle-button" type="button">Выйти</button>
+        </div>
+      </div>
+
+      <p>
+        Выберите год и месяц, введите текущие показания и сохраните расчёт. Данные по месяцам
+        хранятся в Supabase Postgres, поэтому после деплоя они сохраняются между запросами.
+      </p>
     </header>
 
     <main class="layout">
       <section class="md-card">
         <div class="eyebrow">Ввод данных</div>
         <h2>Параметры расчёта</h2>
-        <p class="section-note">Тарифы предзаполнены, по умолчанию скрыты и защищены от случайного редактирования.</p>
+        <p class="section-note">
+          Тарифы предзаполнены, по умолчанию скрыты и защищены от случайного редактирования.
+        </p>
 
         <div id="message-box"></div>
 
@@ -28,6 +43,7 @@
               <label for="calculation-year">Год расчёта</label>
               <select id="calculation-year" name="calculation-year"></select>
             </div>
+
             <div class="field">
               <label for="calculation-month">Месяц расчёта</label>
               <select id="calculation-month" name="calculation-month"></select>
@@ -37,18 +53,22 @@
               <label for="cold-water">Холодная вода</label>
               <input id="cold-water" name="cold-water" type="number" step="0.01" min="0" />
             </div>
+
             <div class="field">
               <label for="hot-water">Горячая вода</label>
               <input id="hot-water" name="hot-water" type="number" step="0.01" min="0" />
             </div>
+
             <div class="field">
               <label for="electricity-t1">Т1</label>
               <input id="electricity-t1" name="electricity-t1" type="number" step="0.01" min="0" />
             </div>
+
             <div class="field">
               <label for="electricity-t2">Т2</label>
               <input id="electricity-t2" name="electricity-t2" type="number" step="0.01" min="0" />
             </div>
+
             <div class="field">
               <label for="electricity-t3">Т3</label>
               <input id="electricity-t3" name="electricity-t3" type="number" step="0.01" min="0" />
@@ -57,8 +77,12 @@
             <div class="tariff-header">
               <h3>Тарифы</h3>
               <div class="tariff-actions">
-                <button class="tonal-button subtle-button" id="toggle-collapse" type="button">Развернуть тарифы</button>
-                <button class="tonal-button" id="toggle-edit" type="button">Изменить тарифы</button>
+                <button class="tonal-button subtle-button" id="toggle-collapse" type="button">
+                  Развернуть тарифы
+                </button>
+                <button class="tonal-button" id="toggle-edit" type="button">
+                  Изменить тарифы
+                </button>
               </div>
             </div>
 
@@ -66,22 +90,27 @@
               <label for="cold-water-tariff">Тариф холодной воды</label>
               <input id="cold-water-tariff" class="tariff-input" type="number" step="0.01" min="0" readonly />
             </div>
+
             <div class="field tariff-field collapsed">
               <label for="hot-water-tariff">Тариф горячей воды</label>
               <input id="hot-water-tariff" class="tariff-input" type="number" step="0.01" min="0" readonly />
             </div>
+
             <div class="field tariff-field collapsed">
               <label for="wastewater-tariff">Тариф водоотведения</label>
               <input id="wastewater-tariff" class="tariff-input" type="number" step="0.01" min="0" readonly />
             </div>
+
             <div class="field tariff-field collapsed">
               <label for="electricity-t1-tariff">Тариф электроэнергии 1</label>
               <input id="electricity-t1-tariff" class="tariff-input" type="number" step="0.01" min="0" readonly />
             </div>
+
             <div class="field tariff-field collapsed">
               <label for="electricity-t2-tariff">Тариф электроэнергии 2</label>
               <input id="electricity-t2-tariff" class="tariff-input" type="number" step="0.01" min="0" readonly />
             </div>
+
             <div class="field tariff-field collapsed full-span">
               <label for="electricity-t3-tariff">Тариф электроэнергии 3</label>
               <input id="electricity-t3-tariff" class="tariff-input" type="number" step="0.01" min="0" readonly />
@@ -98,20 +127,31 @@
         <section class="md-card" id="result-card">
           <div class="eyebrow">Итог</div>
           <h2>Результаты расчёта</h2>
-          <p class="section-note">После сохранения здесь появятся суммы за воду, электричество и общий итог.</p>
-          <div id="result-content" class="result-empty">Выберите период и заполните показания.</div>
+          <p class="section-note">
+            После сохранения здесь появятся суммы за воду, электричество и общий итог.
+          </p>
+          <div id="result-content" class="result-empty">
+            Выберите период и заполните показания.
+          </div>
         </section>
 
         <section class="md-card" id="delta-card">
           <div class="eyebrow">Расход</div>
-          <div id="delta-content" class="result-empty">Расход за месяц появится после расчёта.</div>
+          <div id="delta-content" class="result-empty">
+            Расход за месяц появится после расчёта.
+          </div>
         </section>
 
         <section class="info-card">
           <div class="eyebrow">Формулы</div>
-          <p>Вода = расход холодной × тариф холодной + расход горячей × тариф горячей + (расход холодной + расход горячей) × тариф водоотведения.</p>
-          <p>Электричество = Т1 × тариф Т1 + Т2 × тариф Т2 + Т3 × тариф Т3.</p>
-          <p>Расход = текущий месяц − предыдущий месяц.</p>
+          <p>
+            Вода = расход холодной × тариф холодной + расход горячей × тариф горячей +
+            (расход холодной + расход горячей) × тариф водоотведения.
+          </p>
+          <p>
+            Электричество = Т1 × тариф Т1 + Т2 × тариф Т2 + Т3 × тариф Т3.
+          </p>
+          <p>Расход = текущий месяц - предыдущий месяц.</p>
         </section>
       </aside>
     </main>

@@ -1,3 +1,11 @@
+import {
+  authFetch,
+  getCurrentUser,
+  onAuthStateChange,
+  requireAuth,
+  signOutUser,
+} from "./lib/auth.js";
+
 const monthOptions = [
   ["01", "Январь"],
   ["02", "Февраль"],
@@ -13,7 +21,6 @@ const monthOptions = [
   ["12", "Декабрь"],
 ];
 
-const monthNames = Object.fromEntries(monthOptions);
 const currentYear = new Date().getFullYear();
 const yearOptions = Array.from(
   { length: Math.max(currentYear, 2026) - 2026 + 6 },
@@ -54,6 +61,8 @@ const elements = {
   messageBox: document.getElementById("message-box"),
   resultContent: document.getElementById("result-content"),
   deltaContent: document.getElementById("delta-content"),
+  userEmail: document.getElementById("user-email"),
+  signOutButton: document.getElementById("sign-out-button"),
   toggleCollapse: document.getElementById("toggle-collapse"),
   toggleEdit: document.getElementById("toggle-edit"),
   tariffFields: Array.from(document.querySelectorAll(".tariff-field")),
@@ -114,6 +123,10 @@ function setMessage(type, text) {
   elements.messageBox.innerHTML = `<div class="message ${type}">${text}</div>`;
 }
 
+function setUserEmail(user) {
+  elements.userEmail.textContent = user?.email || "";
+}
+
 function renderEmptyResults() {
   elements.resultContent.innerHTML = "Выберите период и заполните показания.";
   elements.deltaContent.innerHTML = "Расход за месяц появится после расчёта.";
@@ -155,14 +168,11 @@ async function loadMonthData() {
     month: state.selectedMonth,
   });
 
-  const response = await fetch(`/api/month?${params.toString()}`);
+  const response = await authFetch(`/api/month?${params.toString()}`);
   const payload = await response.json();
 
   if (!response.ok) {
-    setMessage(
-      "error",
-      payload.error || "Не удалось загрузить данные месяца."
-    );
+    setMessage("error", payload.error || "Не удалось загрузить данные месяца.");
     fillReadings(null);
     renderEmptyResults();
     return;
@@ -175,7 +185,10 @@ async function loadMonthData() {
   if (payload.readings) {
     setMessage("info", `Загружены сохранённые показания за ${payload.month_key}.`);
   } else if (payload.previous_exists) {
-    setMessage("info", `Для ${payload.month_key} ещё нет сохранённых показаний. Предыдущий месяц для расчёта: ${payload.previous_month_key}.`);
+    setMessage(
+      "info",
+      `Для ${payload.month_key} ещё нет сохранённых показаний. Предыдущий месяц для расчёта: ${payload.previous_month_key}.`
+    );
   } else {
     setMessage("info", `Для ${payload.month_key} ещё нет сохранённых показаний.`);
   }
@@ -204,7 +217,7 @@ async function submitCalculation(event) {
     },
   };
 
-  const response = await fetch("/api/calculate", {
+  const response = await authFetch("/api/calculate", {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -215,10 +228,7 @@ async function submitCalculation(event) {
   const result = await response.json();
 
   if (!response.ok) {
-    setMessage(
-      "error",
-      result.error || "Не удалось выполнить расчёт."
-    );
+    setMessage("error", result.error || "Не удалось выполнить расчёт.");
     return;
   }
 
@@ -251,9 +261,34 @@ function attachEvents() {
   });
 
   elements.form.addEventListener("submit", submitCalculation);
+
+  elements.signOutButton.addEventListener("click", async () => {
+    try {
+      await signOutUser();
+      window.location.replace("/login");
+    } catch (error) {
+      setMessage("error", error instanceof Error ? error.message : "Не удалось выйти из системы.");
+    }
+  });
 }
 
 async function init() {
+  const session = await requireAuth();
+  if (!session) {
+    return;
+  }
+
+  setUserEmail(await getCurrentUser());
+
+  await onAuthStateChange((nextSession) => {
+    if (!nextSession) {
+      window.location.replace("/login");
+      return;
+    }
+
+    setUserEmail(nextSession.user);
+  });
+
   renderYearOptions();
   renderMonthOptions();
   elements.year.value = state.selectedYear;

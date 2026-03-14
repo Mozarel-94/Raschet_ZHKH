@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Вход | Расчёт коммунальных платежей</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="auth-shell">
+    <section class="auth-card">
+      <div class="eyebrow">Supabase Auth</div>
+      <h1>Вход и регистрация</h1>
+      <p class="section-note">
+        Используйте email и пароль для входа в приложение. После успешной авторизации вы будете
+        перенаправлены на защищенную главную страницу.
+      </p>
+
+      <div id="auth-message-box"></div>
+
+      <form id="auth-form" class="auth-form">
+        <div class="field">
+          <label for="auth-email">Email</label>
+          <input id="auth-email" name="email" type="email" autocomplete="email" required />
+        </div>
+
+        <div class="field">
+          <label for="auth-password">Пароль</label>
+          <input
+            id="auth-password"
+            name="password"
+            type="password"
+            autocomplete="current-password"
+            minlength="6"
+            required
+          />
+        </div>
+
+        <div class="auth-actions">
+          <button id="login-button" class="filled-button" type="submit">Войти</button>
+          <button id="signup-button" class="tonal-button" type="button">Зарегистрироваться</button>
+        </div>
+      </form>
+    </section>
+  </div>
+
+  <script type="module" src="/login/app.js"></script>
+</body>
+</html>
