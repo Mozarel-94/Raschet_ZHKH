@@ -17,12 +17,14 @@
 - расчёт как разницы между текущим и предыдущим месяцем
 - редактируемые тарифы с блокировкой и сворачиванием
 - регистрация и вход по `email/password`
+- восстановление пароля по email
 - защищённый доступ к основной странице через `/login`
 
 ## Структура для Netlify
 
 - `web/index.html` — защищённая страница приложения
 - `web/login/index.html` — страница входа и регистрации
+- `web/reset-password/index.html` — страница установки нового пароля
 - `web/styles.css` — стили интерфейса
 - `web/app.js` — клиентская логика калькулятора
 - `web/lib/supabase-browser.js` — клиент Supabase для браузера
@@ -40,11 +42,14 @@
 
 1. Создайте проект в Supabase.
 2. В `Authentication -> Providers` включите `Email`.
-3. Откройте SQL Editor.
-4. Выполните содержимое `supabase/schema.sql`.
-5. Если таблица `meter_readings` уже существует, выполните `supabase/meter_readings_user_scope.sql`.
-6. Выполните содержимое `supabase/auth_profiles.sql`.
-7. Возьмите:
+3. В `Authentication -> URL Configuration -> Redirect URLs` добавьте:
+   - `https://<your-netlify-site>.netlify.app/reset-password`
+   - `http://localhost:8888/reset-password` для локальной разработки
+4. Откройте SQL Editor.
+5. Выполните содержимое `supabase/schema.sql`.
+6. Если таблица `meter_readings` уже существует, выполните `supabase/meter_readings_user_scope.sql`.
+7. Выполните содержимое `supabase/auth_profiles.sql`.
+8. Возьмите:
    - `SUPABASE_URL`
    - `SUPABASE_ANON_KEY`
    - `SUPABASE_SERVICE_ROLE_KEY`
@@ -88,6 +93,8 @@ npx netlify dev
 В проект добавлена базовая клиентская авторизация через `Supabase Auth`:
 
 - страница входа и регистрации: `/login`
+- запрос письма для сброса пароля со страницы `/login`
+- страница установки нового пароля: `/reset-password`
 - защищённая главная страница `/`
 - проверка сессии при загрузке приложения
 - выход из системы через кнопку в интерфейсе

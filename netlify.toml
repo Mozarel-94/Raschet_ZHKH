@@ -24,3 +24,8 @@
   from = "/login"
   to = "/login/index.html"
   status = 200
+
+[[redirects]]
+  from = "/reset-password"
+  to = "/reset-password/index.html"
+  status = 200

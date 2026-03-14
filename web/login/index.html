@@ -12,8 +12,8 @@
       <div class="eyebrow">Supabase Auth</div>
       <h1>Вход и регистрация</h1>
       <p class="section-note">
-        Используйте email и пароль для входа в приложение. После успешной авторизации вы будете
-        перенаправлены на защищенную главную страницу.
+        Используйте email и пароль для входа в приложение. Если пароль забыт, можно запросить
+        письмо для восстановления доступа.
       </p>
 
       <div id="auth-message-box"></div>
@@ -39,6 +39,12 @@
         <div class="auth-actions">
           <button id="login-button" class="filled-button" type="submit">Войти</button>
           <button id="signup-button" class="tonal-button" type="button">Зарегистрироваться</button>
+        </div>
+
+        <div class="auth-secondary-actions">
+          <button id="forgot-password-button" class="link-button" type="button">
+            Забыл пароль
+          </button>
         </div>
       </form>
     </section>

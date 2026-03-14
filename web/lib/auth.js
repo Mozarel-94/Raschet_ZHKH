@@ -5,6 +5,10 @@ function buildRedirectUrl(pathname) {
   return `${pathname}?next=${encodeURIComponent(next)}`;
 }
 
+function getResetPasswordRedirectUrl() {
+  return `${window.location.origin}/reset-password`;
+}
+
 export async function signUpWithEmail(email, password) {
   const supabase = await getSupabaseBrowserClient();
   const { data, error } = await supabase.auth.signUp({
@@ -23,6 +27,32 @@ export async function signInWithEmail(email, password) {
   const supabase = await getSupabaseBrowserClient();
   const { data, error } = await supabase.auth.signInWithPassword({
     email,
+    password,
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+export async function requestPasswordReset(email) {
+  const supabase = await getSupabaseBrowserClient();
+  const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: getResetPasswordRedirectUrl(),
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+export async function updateCurrentUserPassword(password) {
+  const supabase = await getSupabaseBrowserClient();
+  const { data, error } = await supabase.auth.updateUser({
     password,
   });
 
