@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 
 import {
   calculateTotals,
+  formatMonthLabel,
   getPreviousMonthKey,
+  getPreviousYearMonthKey,
   normalizeMonthKey,
   validateDelta,
 } from "../netlify/functions/_lib/calculations.mjs";
@@ -14,6 +16,10 @@ test("normalizeMonthKey formats year and month", () => {
 
 test("getPreviousMonthKey handles year boundary", () => {
   assert.equal(getPreviousMonthKey("2026-01"), "2025-12");
+});
+
+test("getPreviousYearMonthKey keeps month number", () => {
+  assert.equal(getPreviousYearMonthKey("2026-03"), "2025-03");
 });
 
 test("calculateTotals returns water, electricity and total", () => {
@@ -64,6 +70,10 @@ test("validateDelta rejects negative consumption", () => {
         electricity_t2: 0,
         electricity_t3: 0,
       }),
-    /Холодная вода|Р/
+    /Холодная вода|Показания/
   );
+});
+
+test("formatMonthLabel returns readable label", () => {
+  assert.equal(formatMonthLabel("2026-03"), "Март 2026");
 });

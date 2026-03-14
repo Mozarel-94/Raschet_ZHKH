@@ -89,13 +89,13 @@ function renderMonthOptions() {
     .join("");
 }
 
-function applyDefaultTariffs() {
-  elements.coldWaterTariff.value = defaultTariffs.cold_water;
-  elements.hotWaterTariff.value = defaultTariffs.hot_water;
-  elements.wastewaterTariff.value = defaultTariffs.wastewater;
-  elements.t1Tariff.value = defaultTariffs.electricity_t1;
-  elements.t2Tariff.value = defaultTariffs.electricity_t2;
-  elements.t3Tariff.value = defaultTariffs.electricity_t3;
+function applyTariffs(tariffs = defaultTariffs) {
+  elements.coldWaterTariff.value = tariffs.cold_water;
+  elements.hotWaterTariff.value = tariffs.hot_water;
+  elements.wastewaterTariff.value = tariffs.wastewater;
+  elements.t1Tariff.value = tariffs.electricity_t1;
+  elements.t2Tariff.value = tariffs.electricity_t2;
+  elements.t3Tariff.value = tariffs.electricity_t3;
 }
 
 function setTariffsEditable(isEditable) {
@@ -178,7 +178,7 @@ async function loadMonthData() {
     return;
   }
 
-  applyDefaultTariffs();
+  applyTariffs(payload.tariffs || defaultTariffs);
   fillReadings(payload.readings);
   renderEmptyResults();
 
@@ -293,7 +293,7 @@ async function init() {
   renderMonthOptions();
   elements.year.value = state.selectedYear;
   elements.month.value = state.selectedMonth;
-  applyDefaultTariffs();
+  applyTariffs(defaultTariffs);
   setTariffsEditable(false);
   setTariffsCollapsed(true);
   renderEmptyResults();

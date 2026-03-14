@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>История и аналитика | Расчёт коммунальных платежей</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="page-shell">
+    <header class="hero-card">
+      <div class="hero-topbar">
+        <div>
+          <div class="eyebrow">History & Analytics</div>
+          <h1>История и аналитика</h1>
+        </div>
+
+        <div class="auth-status">
+          <a href="/" class="subtle-button nav-link">К калькулятору</a>
+          <span id="history-user-email" class="auth-user"></span>
+          <button id="history-sign-out-button" class="subtle-button" type="button">Выйти</button>
+        </div>
+      </div>
+
+      <p>
+        Здесь можно посмотреть прошлые месяцы, сравнить платежи и расход, а также увидеть тренды
+        по воде и электричеству.
+      </p>
+    </header>
+
+    <div id="history-message-box"></div>
+
+    <main class="history-layout">
+      <aside class="md-card history-sidebar-card">
+        <div class="eyebrow">Месяцы</div>
+        <h2>История</h2>
+        <div id="history-months" class="history-list"></div>
+      </aside>
+
+      <section class="history-content">
+        <section class="md-card">
+          <div class="eyebrow">Аналитика</div>
+          <h2>Сводка</h2>
+          <div id="history-overview" class="stat-grid"></div>
+        </section>
+
+        <section class="md-card">
+          <div class="eyebrow">Тренды</div>
+          <h2>Графики</h2>
+          <div class="chart-stack">
+            <div class="chart-card">
+              <h3>Общий платёж</h3>
+              <div id="total-payment-chart"></div>
+            </div>
+            <div class="chart-card">
+              <h3>Расход воды</h3>
+              <div id="water-chart"></div>
+            </div>
+            <div class="chart-card">
+              <h3>Расход электричества</h3>
+              <div id="electricity-chart"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="md-card">
+          <div class="eyebrow">Детали</div>
+          <h2>Месяц</h2>
+          <div id="history-month-detail" class="detail-stack"></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <script type="module" src="/history/app.js"></script>
+</body>
+</html>

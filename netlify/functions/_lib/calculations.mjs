@@ -38,6 +38,12 @@ export function getPreviousMonthKey(monthKey) {
   return `${year}-${String(month - 1).padStart(2, "0")}`;
 }
 
+export function getPreviousYearMonthKey(monthKey) {
+  const [yearText, monthText] = monthKey.split("-");
+  const year = Number.parseInt(yearText, 10);
+  return `${year - 1}-${monthText}`;
+}
+
 export function parseReading(value, label) {
   const normalizedValue = String(value ?? "").trim().replace(",", ".");
   if (!normalizedValue) {
@@ -90,19 +96,28 @@ export function validateDelta(delta) {
   }
 }
 
+export function calculateWaterBill(delta, tariffs) {
+  return (
+    delta.cold_water * tariffs.cold_water +
+    delta.hot_water * tariffs.hot_water +
+    (delta.cold_water + delta.hot_water) * tariffs.wastewater
+  );
+}
+
+export function calculateElectricityBill(delta, tariffs) {
+  return (
+    delta.electricity_t1 * tariffs.electricity_t1 +
+    delta.electricity_t2 * tariffs.electricity_t2 +
+    delta.electricity_t3 * tariffs.electricity_t3
+  );
+}
+
 export function calculateTotals(currentReadings, previousReadings, tariffs) {
   const delta = calculateDelta(currentReadings, previousReadings);
   validateDelta(delta);
 
-  const waterBill =
-    delta.cold_water * tariffs.cold_water +
-    delta.hot_water * tariffs.hot_water +
-    (delta.cold_water + delta.hot_water) * tariffs.wastewater;
-
-  const electricityBill =
-    delta.electricity_t1 * tariffs.electricity_t1 +
-    delta.electricity_t2 * tariffs.electricity_t2 +
-    delta.electricity_t3 * tariffs.electricity_t3;
+  const waterBill = calculateWaterBill(delta, tariffs);
+  const electricityBill = calculateElectricityBill(delta, tariffs);
 
   return {
     water_bill: waterBill,
@@ -110,4 +125,24 @@ export function calculateTotals(currentReadings, previousReadings, tariffs) {
     total_bill: waterBill + electricityBill,
     delta,
   };
+}
+
+export function formatMonthLabel(monthKey) {
+  const monthNames = {
+    "01": "Январь",
+    "02": "Февраль",
+    "03": "Март",
+    "04": "Апрель",
+    "05": "Май",
+    "06": "Июнь",
+    "07": "Июль",
+    "08": "Август",
+    "09": "Сентябрь",
+    "10": "Октябрь",
+    "11": "Ноябрь",
+    "12": "Декабрь",
+  };
+
+  const [year, month] = monthKey.split("-");
+  return `${monthNames[month]} ${year}`;
 }

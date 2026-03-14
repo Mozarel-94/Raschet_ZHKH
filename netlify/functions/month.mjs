@@ -33,16 +33,16 @@ export function createMonthHandler({
       const month = params.get("month");
       const monthKey = normalizeMonthKey(year, month);
 
-      const readings = await storage.getMonthReadings(user.id, monthKey);
+      const record = await storage.getMonthRecord(user.id, monthKey);
       const previousMonthKey = getPreviousMonthKey(monthKey);
-      const previousExists = (await storage.getMonthReadings(user.id, previousMonthKey)) !== null;
+      const previousRecord = await storage.getMonthRecord(user.id, previousMonthKey);
 
       return json(200, {
         month_key: monthKey,
-        readings,
+        readings: record?.readings ?? null,
         previous_month_key: previousMonthKey,
-        previous_exists: previousExists,
-        tariffs: getDefaultTariffs(),
+        previous_exists: previousRecord !== null,
+        tariffs: record?.tariffs ?? getDefaultTariffs(),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Ошибка запроса.";

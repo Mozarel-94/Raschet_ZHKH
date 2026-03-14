@@ -2,12 +2,13 @@
 
 Приложение подготовлено для схемы `GitHub -> Netlify + Supabase`.
 
-Технически проект теперь состоит из:
+Технически проект состоит из:
 
 - статического фронтенда в `web/`
 - Netlify Functions в `netlify/functions/`
 - хранения помесячных показаний в `Supabase Postgres`
 - клиентской авторизации через `Supabase Auth`
+- экрана истории и аналитики по месяцам
 
 ## Что умеет приложение
 
@@ -18,25 +19,34 @@
 - редактируемые тарифы с блокировкой и сворачиванием
 - регистрация и вход по `email/password`
 - восстановление пароля по email
+- история по месяцам и аналитика потребления/платежей
 - защищённый доступ к основной странице через `/login`
 
-## Структура для Netlify
+## Структура
 
-- `web/index.html` — защищённая страница приложения
+- `web/index.html` — защищённая страница калькулятора
+- `web/app.js` — клиентская логика калькулятора
+- `web/history/index.html` — экран истории и аналитики
+- `web/history/app.js` — клиентская логика истории
 - `web/login/index.html` — страница входа и регистрации
 - `web/reset-password/index.html` — страница установки нового пароля
-- `web/styles.css` — стили интерфейса
-- `web/app.js` — клиентская логика калькулятора
-- `web/lib/supabase-browser.js` — клиент Supabase для браузера
 - `web/lib/auth.js` — auth-логика на клиенте
-- `netlify/functions/auth-config.mjs` — публичный конфиг для browser auth client
+- `web/lib/history-api.js` — клиентский сервис истории
+- `web/lib/supabase-browser.js` — клиент Supabase для браузера
+- `web/types/history-analytics.d.ts` — reference-типы для интеграции
 - `netlify/functions/month.mjs` — загрузка данных выбранного месяца
 - `netlify/functions/calculate.mjs` — сохранение и расчёт
-- `netlify/functions/_lib/storage.mjs` — работа с Supabase
-- `supabase/schema.sql` — SQL-схема таблицы показаний
+- `netlify/functions/history.mjs` — история и аналитика
+- `netlify/functions/auth-config.mjs` — публичный конфиг для browser auth client
+- `netlify/functions/_lib/calculations.mjs` — доменная логика расчёта
+- `netlify/functions/_lib/storage.mjs` — чтение/запись истории
+- `netlify/functions/_lib/history.mjs` — серверная аналитика
+- `supabase/schema.sql` — новая полная схема таблицы показаний
 - `supabase/meter_readings_user_scope.sql` — миграция для привязки показаний к `user_id`
+- `supabase/history_analytics.sql` — миграция для тарифов и аналитики
 - `supabase/auth_profiles.sql` — SQL для `profiles` и trigger'а пользователей
-- `netlify.toml` — конфиг деплоя
+- `reference/react/HistoryAnalyticsPage.tsx` — React reference-компоненты
+- `docs/history-analytics-plan.md` — архитектурный план и инструкция по интеграции
 
 ## Настройка Supabase
 
@@ -44,11 +54,13 @@
 2. В `Authentication -> Providers` включите `Email`.
 3. В `Authentication -> URL Configuration -> Redirect URLs` добавьте:
    - `https://<your-netlify-site>.netlify.app/reset-password`
-   - `http://localhost:8888/reset-password` для локальной разработки
+   - `http://localhost:8888/reset-password`
 4. Откройте SQL Editor.
-5. Выполните содержимое `supabase/schema.sql`.
-6. Если таблица `meter_readings` уже существует, выполните `supabase/meter_readings_user_scope.sql`.
-7. Выполните содержимое `supabase/auth_profiles.sql`.
+5. Если начинаете с нуля, выполните `supabase/schema.sql`.
+6. Если таблица `meter_readings` уже существует, выполните:
+   - `supabase/meter_readings_user_scope.sql`
+   - `supabase/history_analytics.sql`
+7. Выполните `supabase/auth_profiles.sql`.
 8. Возьмите:
    - `SUPABASE_URL`
    - `SUPABASE_ANON_KEY`
@@ -64,7 +76,7 @@
 
 `SUPABASE_ANON_KEY` используется клиентской авторизацией через Supabase Auth.
 
-`SUPABASE_SERVICE_ROLE_KEY` нужен только серверным Netlify Functions. Во фронтенд он не попадает напрямую: клиент получает только публичную конфигурацию через `auth-config` endpoint.
+`SUPABASE_SERVICE_ROLE_KEY` нужен только серверным Netlify Functions.
 
 ## Локальный запуск
 
@@ -73,38 +85,32 @@ npm install
 npx netlify dev
 ```
 
-Для локального запуска также нужны переменные окружения `SUPABASE_URL`, `SUPABASE_ANON_KEY` и `SUPABASE_SERVICE_ROLE_KEY`.
+Для локального запуска нужны `SUPABASE_URL`, `SUPABASE_ANON_KEY` и `SUPABASE_SERVICE_ROLE_KEY`.
 
-## Деплой через GitHub в Netlify
+## Деплой
 
 1. Запушьте репозиторий на GitHub.
-2. В Netlify выберите `Add new site` -> `Import an existing project`.
+2. В Netlify выберите `Add new site -> Import an existing project`.
 3. Подключите GitHub-репозиторий.
-4. Netlify сам прочитает `netlify.toml`.
-5. Если настройки нужно указать вручную:
-   - Build command: `npm install`
-   - Publish directory: `web`
-   - Functions directory: `netlify/functions`
-6. Проверьте, что заданы `SUPABASE_URL`, `SUPABASE_ANON_KEY` и `SUPABASE_SERVICE_ROLE_KEY`.
-7. Запустите deploy.
+4. Проверьте, что заданы `SUPABASE_URL`, `SUPABASE_ANON_KEY` и `SUPABASE_SERVICE_ROLE_KEY`.
+5. Запустите deploy.
 
-## Авторизация
+## История и аналитика
 
-В проект добавлена базовая клиентская авторизация через `Supabase Auth`:
+Экран `/history` показывает:
 
-- страница входа и регистрации: `/login`
-- запрос письма для сброса пароля со страницы `/login`
-- страница установки нового пароля: `/reset-password`
-- защищённая главная страница `/`
-- проверка сессии при загрузке приложения
-- выход из системы через кнопку в интерфейсе
-- SQL для таблицы профилей и trigger'а: `supabase/auth_profiles.sql`
+- список месяцев
+- детализацию выбранного месяца
+- график общего платежа
+- графики расхода воды и электричества
+- средние значения
+- самый дорогой месяц
+- сравнение с предыдущим месяцем и прошлым годом
 
-## Импорт января и февраля
+Подробный план и интеграция:
 
-Январь и февраль 2026 уже зашиты в `netlify/functions/_lib/seed-data.mjs`.
+- `docs/history-analytics-plan.md`
 
-Если этих месяцев ещё нет в Supabase, сервер автоматически импортирует их при первом обращении к соответствующему месяцу.
 ## Тесты
 
 ```bash
@@ -116,4 +122,5 @@ npm test
 - расчётную логику
 - auth helper'ы
 - user-scoped storage
-- handlers для проверки, что чтение и запись идут в контексте авторизованного пользователя
+- handlers
+- агрегацию истории и аналитики

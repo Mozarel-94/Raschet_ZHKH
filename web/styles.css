@@ -252,6 +252,12 @@ button:disabled {
   border: 1px solid var(--md-outline-variant);
 }
 
+.nav-link {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
 .actions {
   margin-top: 24px;
 }
@@ -358,8 +364,186 @@ button:disabled {
   text-decoration: underline;
 }
 
+.history-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.history-content {
+  display: grid;
+  gap: 24px;
+}
+
+.history-sidebar-card {
+  position: sticky;
+  top: 24px;
+}
+
+.history-list {
+  display: grid;
+  gap: 12px;
+}
+
+.history-month-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 16px 18px;
+  border-radius: 20px;
+  background: var(--md-surface);
+  border: 1px solid var(--md-outline-variant);
+  text-align: left;
+}
+
+.history-month-item.active {
+  background: var(--md-primary-container);
+  color: var(--md-on-primary-container);
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.stat-card,
+.comparison-card,
+.detail-card,
+.chart-card,
+.detail-header-card {
+  padding: 18px;
+  border-radius: 22px;
+  background: var(--md-surface);
+  border: 1px solid var(--md-outline-variant);
+}
+
+.stat-card strong,
+.comparison-card strong {
+  display: block;
+  margin-top: 10px;
+  font-size: 1.2rem;
+}
+
+.stat-label {
+  color: var(--md-on-surface-variant);
+  font-size: 0.875rem;
+}
+
+.chart-stack {
+  display: grid;
+  gap: 18px;
+}
+
+.chart-card h3,
+.detail-card h3,
+.formula-block h3 {
+  margin: 0 0 12px;
+  font-size: 1.1rem;
+}
+
+.chart-bars {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(82px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.chart-bar-item {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.chart-bar-value,
+.chart-bar-label {
+  font-size: 0.78rem;
+  color: var(--md-on-surface-variant);
+  text-align: center;
+}
+
+.chart-bar-track {
+  position: relative;
+  height: 180px;
+  border-radius: 18px;
+  background: var(--md-surface-container-high);
+  overflow: hidden;
+}
+
+.chart-bar-fill {
+  position: absolute;
+  inset: auto 0 0 0;
+  border-radius: 18px 18px 0 0;
+  background: linear-gradient(180deg, var(--md-primary), var(--md-tertiary-container));
+}
+
+.detail-stack {
+  display: grid;
+  gap: 18px;
+}
+
+.detail-header-card {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.detail-total {
+  font-size: 1.35rem;
+}
+
+.comparison-grid,
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.detail-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.detail-list,
+.formula-parts {
+  display: grid;
+  gap: 10px;
+}
+
+.detail-list div,
+.formula-part {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--md-outline-variant);
+}
+
+.detail-list div:last-child,
+.formula-part:last-child {
+  border-bottom: 0;
+}
+
+.formula-block {
+  padding: 18px;
+  border-radius: 22px;
+  background: var(--md-surface);
+  border: 1px solid var(--md-outline-variant);
+}
+
 @media (max-width: 900px) {
   .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .history-layout,
+  .stat-grid,
+  .comparison-grid,
+  .detail-grid {
     grid-template-columns: 1fr;
   }
 
@@ -374,6 +558,10 @@ button:disabled {
 
   .auth-status {
     justify-content: flex-start;
+  }
+
+  .history-sidebar-card {
+    position: static;
   }
 }
 

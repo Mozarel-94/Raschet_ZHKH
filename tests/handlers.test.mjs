@@ -4,24 +4,26 @@ import assert from "node:assert/strict";
 import { createCalculateHandler } from "../netlify/functions/calculate.mjs";
 import { createMonthHandler } from "../netlify/functions/month.mjs";
 
-test("calculate handler stores readings under authenticated user", async () => {
+test("calculate handler stores record under authenticated user", async () => {
   const calls = [];
   const storage = {
-    async saveMonthReadings(userId, monthKey, readings) {
-      calls.push({ type: "save", userId, monthKey, readings });
-    },
-    async getMonthReadings(userId, monthKey) {
-      calls.push({ type: "get", userId, monthKey });
+    async getMonthRecord(userId, monthKey) {
+      calls.push({ type: "getRecord", userId, monthKey });
       if (monthKey === "2026-02") {
         return {
-          cold_water: 10,
-          hot_water: 10,
-          electricity_t1: 10,
-          electricity_t2: 10,
-          electricity_t3: 10,
+          readings: {
+            cold_water: 10,
+            hot_water: 10,
+            electricity_t1: 10,
+            electricity_t2: 10,
+            electricity_t3: 10,
+          },
         };
       }
       return null;
+    },
+    async saveMonthRecord(userId, monthKey, readings, tariffs, result) {
+      calls.push({ type: "saveRecord", userId, monthKey, readings, tariffs, result });
     },
   };
 
@@ -62,18 +64,28 @@ test("calculate handler stores readings under authenticated user", async () => {
   assert.equal(payload.saved, true);
 });
 
-test("month handler reads only authenticated user data", async () => {
+test("month handler returns saved tariffs and readings", async () => {
   const calls = [];
   const storage = {
-    async getMonthReadings(userId, monthKey) {
+    async getMonthRecord(userId, monthKey) {
       calls.push({ userId, monthKey });
       return monthKey === "2026-03"
         ? {
-            cold_water: 1,
-            hot_water: 2,
-            electricity_t1: 3,
-            electricity_t2: 4,
-            electricity_t3: 5,
+            readings: {
+              cold_water: 1,
+              hot_water: 2,
+              electricity_t1: 3,
+              electricity_t2: 4,
+              electricity_t3: 5,
+            },
+            tariffs: {
+              cold_water: 11,
+              hot_water: 12,
+              wastewater: 13,
+              electricity_t1: 14,
+              electricity_t2: 15,
+              electricity_t3: 16,
+            },
           }
         : null;
     },
@@ -94,6 +106,7 @@ test("month handler reads only authenticated user data", async () => {
   assert.equal(response.statusCode, 200);
   assert.equal(calls[0].userId, "user-77");
   assert.equal(payload.readings.cold_water, 1);
+  assert.equal(payload.tariffs.wastewater, 13);
 });
 
 test("handlers return 401 when user is not authenticated", async () => {

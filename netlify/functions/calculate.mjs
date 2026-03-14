@@ -56,12 +56,13 @@ export function createCalculateHandler({
         electricity_t3: parseTariff(rawTariffs.electricity_t3, "Тариф электроэнергии 3"),
       };
 
-      await storage.saveMonthReadings(user.id, monthKey, readings);
-
       const previousMonthKey = getPreviousMonthKey(monthKey);
-      const previousReadings = await storage.getMonthReadings(user.id, previousMonthKey);
+      const previousRecord = await storage.getMonthRecord(user.id, previousMonthKey);
+      const result = previousRecord ? calculateTotals(readings, previousRecord.readings, tariffs) : null;
 
-      if (previousReadings === null) {
+      await storage.saveMonthRecord(user.id, monthKey, readings, tariffs, result);
+
+      if (result === null) {
         return json(200, {
           month_key: monthKey,
           saved: true,
@@ -70,8 +71,6 @@ export function createCalculateHandler({
           message: `Показания за ${monthKey} сохранены. Для расчёта нужны данные за предыдущий месяц: ${previousMonthKey}.`,
         });
       }
-
-      const result = calculateTotals(readings, previousReadings, tariffs);
 
       return json(200, {
         month_key: monthKey,
