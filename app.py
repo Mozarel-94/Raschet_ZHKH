@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 from datetime import date
 from html import escape
 from urllib.parse import parse_qs
@@ -12,11 +14,14 @@ from history_analytics import (
     build_history_analytics,
     build_month_comparisons,
     build_month_formulas,
+    build_month_trends,
     format_month_label,
+    month_status,
 )
 from storage import (
     DEFAULT_TARIFFS,
     MonthlyRecord,
+    get_effective_tariffs_for_month,
     get_month_record,
     get_previous_month_readings,
     list_history_records,
@@ -164,11 +169,24 @@ def _number(value: float | None, unit: str = "") -> str:
     return f"{value:.2f}{suffix}"
 
 
+def _format_trend(value: float | None) -> str:
+    if value is None:
+        return "Сравнение недоступно"
+    sign = "+" if value > 0 else ""
+    return f"{sign}{value:.2f} руб."
+
+
+def _status_class(status: str) -> str:
+    return "status-calculated" if status == "Рассчитан" else "status-pending"
+
+
 def _build_form_data_for_month(month_key: str, existing_form_data: dict[str, str] | None = None) -> dict[str, str]:
     year_value, month_value = month_key.split("-")
     form_data = dict(DEFAULT_FORM_VALUES)
     form_data["calculation_year"] = year_value
     form_data["calculation_month"] = month_value
+    effective_tariffs = get_effective_tariffs_for_month(month_key)
+    form_data = _apply_tariffs_to_form_data(form_data, effective_tariffs)
 
     if existing_form_data:
         for key, value in existing_form_data.items():
@@ -182,14 +200,81 @@ def _build_form_data_for_month(month_key: str, existing_form_data: dict[str, str
         form_data["electricity_t1"] = str(int(saved_record.readings.electricity_t1))
         form_data["electricity_t2"] = str(int(saved_record.readings.electricity_t2))
         form_data["electricity_t3"] = str(int(saved_record.readings.electricity_t3))
-        form_data["cold_water_tariff"] = f"{saved_record.tariffs.cold_water:.2f}"
-        form_data["hot_water_tariff"] = f"{saved_record.tariffs.hot_water:.2f}"
-        form_data["wastewater_tariff"] = f"{saved_record.tariffs.wastewater:.2f}"
-        form_data["electricity_t1_tariff"] = f"{saved_record.tariffs.electricity_t1:.2f}"
-        form_data["electricity_t2_tariff"] = f"{saved_record.tariffs.electricity_t2:.2f}"
-        form_data["electricity_t3_tariff"] = f"{saved_record.tariffs.electricity_t3:.2f}"
+        form_data = _apply_tariffs_to_form_data(form_data, saved_record.tariffs)
 
     return form_data
+
+
+def _apply_tariffs_to_form_data(form_data: dict[str, str], tariffs: Tariffs) -> dict[str, str]:
+    next_form_data = dict(form_data)
+    next_form_data["cold_water_tariff"] = f"{tariffs.cold_water:.2f}"
+    next_form_data["hot_water_tariff"] = f"{tariffs.hot_water:.2f}"
+    next_form_data["wastewater_tariff"] = f"{tariffs.wastewater:.2f}"
+    next_form_data["electricity_t1_tariff"] = f"{tariffs.electricity_t1:.2f}"
+    next_form_data["electricity_t2_tariff"] = f"{tariffs.electricity_t2:.2f}"
+    next_form_data["electricity_t3_tariff"] = f"{tariffs.electricity_t3:.2f}"
+    return next_form_data
+
+
+def _build_csv_export(records: list[MonthlyRecord]) -> bytes:
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(
+        [
+            "month_key",
+            "status",
+            "cold_water",
+            "hot_water",
+            "electricity_t1",
+            "electricity_t2",
+            "electricity_t3",
+            "cold_water_tariff",
+            "hot_water_tariff",
+            "wastewater_tariff",
+            "electricity_t1_tariff",
+            "electricity_t2_tariff",
+            "electricity_t3_tariff",
+            "delta_cold_water",
+            "delta_hot_water",
+            "delta_electricity_t1",
+            "delta_electricity_t2",
+            "delta_electricity_t3",
+            "water_bill",
+            "electricity_bill",
+            "total_bill",
+            "updated_at",
+        ]
+    )
+
+    for record in records:
+        writer.writerow(
+            [
+                record.month_key,
+                month_status(record),
+                int(record.readings.cold_water),
+                int(record.readings.hot_water),
+                int(record.readings.electricity_t1),
+                int(record.readings.electricity_t2),
+                int(record.readings.electricity_t3),
+                f"{record.tariffs.cold_water:.2f}",
+                f"{record.tariffs.hot_water:.2f}",
+                f"{record.tariffs.wastewater:.2f}",
+                f"{record.tariffs.electricity_t1:.2f}",
+                f"{record.tariffs.electricity_t2:.2f}",
+                f"{record.tariffs.electricity_t3:.2f}",
+                "" if record.delta is None else f"{record.delta.cold_water:.2f}",
+                "" if record.delta is None else f"{record.delta.hot_water:.2f}",
+                "" if record.delta is None else f"{record.delta.electricity_t1:.2f}",
+                "" if record.delta is None else f"{record.delta.electricity_t2:.2f}",
+                "" if record.delta is None else f"{record.delta.electricity_t3:.2f}",
+                "" if record.water_bill is None else f"{record.water_bill:.2f}",
+                "" if record.electricity_bill is None else f"{record.electricity_bill:.2f}",
+                "" if record.total_bill is None else f"{record.total_bill:.2f}",
+                record.updated_at,
+            ]
+        )
+
+    return output.getvalue().encode("utf-8-sig")
 
 
 def _render_select_options(options: list[tuple[str, str]], selected_value: str) -> str:
@@ -287,13 +372,23 @@ def _render_history_sidebar(records: list[MonthlyRecord], selected_month_key: st
     if not records:
         return '<div class="card empty-card">История пока пустая. Сохраните хотя бы один месяц.</div>'
 
+    trends = build_month_trends(records)
     items = []
     for record in records:
         active_class = " active" if record.month_key == selected_month_key else ""
+        status = month_status(record)
+        status_class = _status_class(status)
+        trend = _format_trend(trends.get(record.month_key))
         items.append(
             f"""
             <a class="history-link{active_class}" href="/history?month={escape(record.month_key)}">
-              <span>{escape(format_month_label(record.month_key))}</span>
+              <div class="history-link-main">
+                <span>{escape(format_month_label(record.month_key))}</span>
+                <span class="history-meta">
+                  <span class="status-badge {status_class}">{escape(status)}</span>
+                  <span class="trend-chip">{escape(trend)}</span>
+                </span>
+              </div>
               <strong>{escape(_money(record.total_bill))}</strong>
             </a>
             """
@@ -363,11 +458,18 @@ def _render_history_detail(selected_record: MonthlyRecord | None, all_records: l
     comparisons = build_month_comparisons(all_records, selected_record.month_key)
     formulas = build_month_formulas(selected_record)
     delta = selected_record.delta
+    status = month_status(selected_record)
+    status_class = _status_class(status)
+    trend = _format_trend(build_month_trends(all_records).get(selected_record.month_key))
 
     return f"""
     <section class="card">
       <div class="eyebrow">Период</div>
       <h2>{escape(format_month_label(selected_record.month_key))}</h2>
+      <div class="detail-meta">
+        <span class="status-badge {status_class}">{escape(status)}</span>
+        <span class="trend-chip">Тренд: {escape(trend)}</span>
+      </div>
       <div class="result-row total"><span>Общий платёж</span><strong>{escape(_money(selected_record.total_bill))}</strong></div>
     </section>
 
@@ -522,6 +624,7 @@ def _render_base(title: str, body: str, active_page: str) -> str:
     .readonly-input {{ background: #f0ece6; color: #7b6d5f; }}
     .full {{ grid-column: 1 / -1; }}
     .actions {{ margin-top: 22px; display: flex; gap: 12px; flex-wrap: wrap; }}
+    .inline-status {{ margin: 8px 0 14px; }}
     button {{
       border: 0;
       border-radius: 999px;
@@ -549,6 +652,20 @@ def _render_base(title: str, body: str, active_page: str) -> str:
     .history-list {{ padding-top: 10px; }}
     .history-link {{ text-decoration: none; color: inherit; padding: 14px 0; }}
     .history-link.active {{ color: var(--accent-strong); }}
+    .history-link-main {{ display: grid; gap: 8px; }}
+    .history-meta, .detail-meta {{ display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }}
+    .detail-meta {{ margin: 10px 0 8px; }}
+    .status-badge, .trend-chip {{
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 0.8rem;
+      font-weight: 700;
+    }}
+    .status-calculated {{ background: #d9efe2; color: #245b41; }}
+    .status-pending {{ background: #e8edf2; color: #526575; }}
+    .trend-chip {{ background: #e1edf5; color: #365b72; }}
     .stat-card {{
       background: var(--surface);
       border-radius: 20px;
@@ -616,6 +733,13 @@ def _render_calculator_page(
     error_block = f'<div class="message error">{escape(error_message)}</div>' if error_message else ""
     info_block = f'<div class="message info">{escape(info_message)}</div>' if info_message else ""
     selected_history_link = f'/history?month={escape(selected_month_key)}' if selected_month_key else "/history"
+    current_record = get_month_record(selected_month_key) if selected_month_key else None
+    current_status = month_status(current_record) if current_record is not None else None
+    current_status_block = (
+        f'<div class="inline-status"><span class="status-badge {_status_class(current_status)}">{escape(current_status)}</span></div>'
+        if current_status
+        else ""
+    )
 
     body = f"""
     <div class="layout">
@@ -623,6 +747,7 @@ def _render_calculator_page(
         <div class="eyebrow">Ввод данных</div>
         <h2 class="section-title">Параметры расчёта</h2>
         <p class="section-note">Выберите месяц, внесите текущие показания и при необходимости скорректируйте тарифы для конкретного периода.</p>
+        {current_status_block}
         {error_block}
         {info_block}
         <form method="post">
@@ -659,7 +784,6 @@ def _render_calculator_page(
             <div class="tariff-header">
               <h3>Тарифы месяца</h3>
               <div class="tariff-actions">
-                <button type="button" class="ghost-button" id="collapse-tariffs">Развернуть тарифы</button>
                 <button type="button" class="ghost-button" id="toggle-tariffs">Редактировать тарифы</button>
               </div>
             </div>
@@ -704,7 +828,6 @@ def _render_calculator_page(
     </div>
     <script>
       const toggleButton = document.getElementById("toggle-tariffs");
-      const collapseButton = document.getElementById("collapse-tariffs");
       const tariffInputs = document.querySelectorAll(".tariff-input");
       const tariffSections = document.querySelectorAll(".tariff-section");
       const calculationYear = document.getElementById("calculation_year");
@@ -713,20 +836,16 @@ def _render_calculator_page(
       let tariffsCollapsed = true;
 
       toggleButton.addEventListener("click", function () {{
-        tariffsEditable = !tariffsEditable;
+        tariffsCollapsed = !tariffsCollapsed;
+        tariffsEditable = !tariffsCollapsed;
+        tariffSections.forEach(function (section) {{
+          section.classList.toggle("collapsed", tariffsCollapsed);
+        }});
         tariffInputs.forEach(function (input) {{
           input.readOnly = !tariffsEditable;
           input.classList.toggle("readonly-input", !tariffsEditable);
         }});
-        toggleButton.textContent = tariffsEditable ? "Зафиксировать тарифы" : "Редактировать тарифы";
-      }});
-
-      collapseButton.addEventListener("click", function () {{
-        tariffsCollapsed = !tariffsCollapsed;
-        tariffSections.forEach(function (section) {{
-          section.classList.toggle("collapsed", tariffsCollapsed);
-        }});
-        collapseButton.textContent = tariffsCollapsed ? "Развернуть тарифы" : "Свернуть тарифы";
+        toggleButton.textContent = tariffsCollapsed ? "Редактировать тарифы" : "Скрыть тарифы";
       }});
 
       function reloadMonthData() {{
@@ -765,6 +884,9 @@ def _render_history_page(selected_month_key: str | None = None) -> str:
         {_render_history_sidebar(records, selected_month_key)}
       </aside>
       <section>
+        <div class="actions">
+          <a href="/history/export.csv" class="nav-link">Экспорт CSV</a>
+        </div>
         <div class="stat-grid">
           <article class="stat-card">
             <span class="stat-label">Средний платёж</span>
@@ -871,9 +993,11 @@ def _handle_calculator(environ: dict[str, object]) -> str:
             if previous_readings is None:
                 save_month_record(selected_month_key, readings, tariffs, None)
                 form_data = _build_form_data_for_month(selected_month_key, form_data)
+                saved_record = get_month_record(selected_month_key)
                 info_message = (
-                    f"Показания за {selected_month_key} сохранены локально. Для полного расчёта нужен предыдущий месяц: "
-                    f"{previous_month}."
+                    f"Показания за {selected_month_key} сохранены локально. "
+                    f"Статус: {month_status(saved_record) if saved_record else 'Сохранён без расчёта'}. "
+                    f"Для полного расчёта нужен предыдущий месяц: {previous_month}."
                 )
             else:
                 result = calculate_totals(
@@ -883,9 +1007,12 @@ def _handle_calculator(environ: dict[str, object]) -> str:
                         tariffs=tariffs,
                     )
                 )
-                save_month_record(selected_month_key, readings, tariffs, result)
+                saved_record = save_month_record(selected_month_key, readings, tariffs, result)
                 form_data = _build_form_data_for_month(selected_month_key, form_data)
-                info_message = f"Показания и расчёт за {selected_month_key} сохранены локально."
+                info_message = (
+                    f"Показания и расчёт за {selected_month_key} сохранены локально. "
+                    f"Статус: {month_status(saved_record)}."
+                )
         except ValueError as error:
             error_message = str(error)
 
@@ -899,8 +1026,22 @@ def _handle_calculator(environ: dict[str, object]) -> str:
     )
 
 
+def _handle_history_export() -> tuple[str, list[tuple[str, str]], bytes]:
+    payload = _build_csv_export(list_history_records())
+    headers = [
+        ("Content-Type", "text/csv; charset=utf-8"),
+        ("Content-Disposition", 'attachment; filename="zhkh-history.csv"'),
+    ]
+    return "200 OK", headers, payload
+
+
 def application(environ, start_response):
     path = str(environ.get("PATH_INFO", "/") or "/")
+
+    if path == "/history/export.csv":
+        status, headers, body = _handle_history_export()
+        start_response(status, headers)
+        return [body]
 
     if path == "/history":
         query = _parse_query(environ)

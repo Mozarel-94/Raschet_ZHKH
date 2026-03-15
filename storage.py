@@ -202,3 +202,15 @@ def list_history_records() -> list[MonthlyRecord]:
             records.append(_normalize_record(month_key, raw_record))
 
     return sorted(records, key=lambda record: record.month_key, reverse=True)
+
+
+def get_effective_tariffs_for_month(month_key: str) -> Tariffs:
+    current_record = get_month_record(month_key)
+    if current_record is not None:
+        return current_record.tariffs
+
+    older_records = [record for record in list_history_records() if record.month_key < month_key]
+    if older_records:
+        return older_records[0].tariffs
+
+    return DEFAULT_TARIFFS

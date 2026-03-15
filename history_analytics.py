@@ -32,6 +32,10 @@ def format_month_label(month_key: str) -> str:
     return f"{MONTH_NAMES.get(month, month)} {year}"
 
 
+def month_status(record: MonthlyRecord) -> str:
+    return "Рассчитан" if record.delta is not None and record.total_bill is not None else "Сохранён без расчёта"
+
+
 def get_previous_month_key(month_key: str) -> str:
     year_text, month_text = month_key.split("-")
     year = int(year_text)
@@ -167,6 +171,24 @@ def build_month_comparisons(records: list[MonthlyRecord], month_key: str) -> dic
         "previous_month_delta_diff": _compare_delta(current, previous_month),
         "previous_year_delta_diff": _compare_delta(current, previous_year),
     }
+
+
+def build_month_trends(records: list[MonthlyRecord]) -> dict[str, float | None]:
+    trends: dict[str, float | None] = {}
+    record_map = {record.month_key: record for record in records}
+
+    for record in records:
+        previous_month = record_map.get(get_previous_month_key(record.month_key))
+        if (
+            previous_month is not None
+            and record.total_bill is not None
+            and previous_month.total_bill is not None
+        ):
+            trends[record.month_key] = round_value(record.total_bill - previous_month.total_bill)
+        else:
+            trends[record.month_key] = None
+
+    return trends
 
 
 def build_month_formulas(record: MonthlyRecord) -> dict[str, object] | None:
