@@ -1,4 +1,4 @@
-"""Simple web interface for utility payment calculation."""
+"""Local web interface for utility calculation and monthly analytics."""
 
 from __future__ import annotations
 
@@ -7,14 +7,21 @@ from html import escape
 from urllib.parse import parse_qs
 from wsgiref.simple_server import make_server
 
-from calculator import (
-    CalculationInputs,
-    CalculationResult,
-    MeterReadings,
-    Tariffs,
-    calculate_totals,
+from calculator import CalculationInputs, CalculationResult, MeterReadings, Tariffs, calculate_totals
+from history_analytics import (
+    build_history_analytics,
+    build_month_comparisons,
+    build_month_formulas,
+    format_month_label,
 )
-from storage import get_month_readings, get_previous_month_readings, save_month_readings
+from storage import (
+    DEFAULT_TARIFFS,
+    MonthlyRecord,
+    get_month_record,
+    get_previous_month_readings,
+    list_history_records,
+    save_month_record,
+)
 
 HOST = "127.0.0.1"
 PORT = 8000
@@ -25,15 +32,15 @@ FIELD_LABELS = {
     "calculation_month": "Месяц расчёта",
     "cold_water": "Холодная вода",
     "hot_water": "Горячая вода",
-    "electricity_t1": "Т1",
-    "electricity_t2": "Т2",
-    "electricity_t3": "Т3",
+    "electricity_t1": "T1",
+    "electricity_t2": "T2",
+    "electricity_t3": "T3",
     "cold_water_tariff": "Тариф холодной воды",
     "hot_water_tariff": "Тариф горячей воды",
     "wastewater_tariff": "Тариф водоотведения",
-    "electricity_t1_tariff": "Тариф электроэнергии 1",
-    "electricity_t2_tariff": "Тариф электроэнергии 2",
-    "electricity_t3_tariff": "Тариф электроэнергии 3",
+    "electricity_t1_tariff": "Тариф электроэнергии T1",
+    "electricity_t2_tariff": "Тариф электроэнергии T2",
+    "electricity_t3_tariff": "Тариф электроэнергии T3",
 }
 
 DEFAULT_FORM_VALUES = {
@@ -44,12 +51,12 @@ DEFAULT_FORM_VALUES = {
     "electricity_t1": "",
     "electricity_t2": "",
     "electricity_t3": "",
-    "cold_water_tariff": "65.77",
-    "hot_water_tariff": "312.50",
-    "wastewater_tariff": "51.62",
-    "electricity_t1_tariff": "10.23",
-    "electricity_t2_tariff": "3.71",
-    "electricity_t3_tariff": "7.16",
+    "cold_water_tariff": f"{DEFAULT_TARIFFS.cold_water:.2f}",
+    "hot_water_tariff": f"{DEFAULT_TARIFFS.hot_water:.2f}",
+    "wastewater_tariff": f"{DEFAULT_TARIFFS.wastewater:.2f}",
+    "electricity_t1_tariff": f"{DEFAULT_TARIFFS.electricity_t1:.2f}",
+    "electricity_t2_tariff": f"{DEFAULT_TARIFFS.electricity_t2:.2f}",
+    "electricity_t3_tariff": f"{DEFAULT_TARIFFS.electricity_t3:.2f}",
 }
 
 MONTH_OPTIONS = [
@@ -81,9 +88,26 @@ def _parse_float(form_data: dict[str, str], field_name: str) -> float:
         raise ValueError(f"Поле '{FIELD_LABELS[field_name]}' должно быть числом.") from error
 
     if value < 0:
-        raise ValueError(
-            f"Поле '{FIELD_LABELS[field_name]}' не может быть отрицательным."
-        )
+        raise ValueError(f"Поле '{FIELD_LABELS[field_name]}' не может быть отрицательным.")
+
+    return value
+
+
+def _parse_int(form_data: dict[str, str], field_name: str) -> int:
+    raw_value = form_data.get(field_name, "").strip()
+    if not raw_value:
+        raise ValueError(f"Поле '{FIELD_LABELS[field_name]}' не может быть пустым.")
+
+    if any(symbol in raw_value for symbol in (".", ",")):
+        raise ValueError(f"Поле '{FIELD_LABELS[field_name]}' должно быть целым числом.")
+
+    try:
+        value = int(raw_value)
+    except ValueError as error:
+        raise ValueError(f"Поле '{FIELD_LABELS[field_name]}' должно быть целым числом.") from error
+
+    if value < 0:
+        raise ValueError(f"Поле '{FIELD_LABELS[field_name]}' не может быть отрицательным.")
 
     return value
 
@@ -104,11 +128,11 @@ def _parse_month_key(form_data: dict[str, str]) -> str:
 
 def _build_readings(form_data: dict[str, str]) -> MeterReadings:
     return MeterReadings(
-        cold_water=_parse_float(form_data, "cold_water"),
-        hot_water=_parse_float(form_data, "hot_water"),
-        electricity_t1=_parse_float(form_data, "electricity_t1"),
-        electricity_t2=_parse_float(form_data, "electricity_t2"),
-        electricity_t3=_parse_float(form_data, "electricity_t3"),
+        cold_water=float(_parse_int(form_data, "cold_water")),
+        hot_water=float(_parse_int(form_data, "hot_water")),
+        electricity_t1=float(_parse_int(form_data, "electricity_t1")),
+        electricity_t2=float(_parse_int(form_data, "electricity_t2")),
+        electricity_t3=float(_parse_int(form_data, "electricity_t3")),
     )
 
 
@@ -129,14 +153,18 @@ def _value(form_data: dict[str, str] | None, field_name: str) -> str:
     return escape(form_data.get(field_name, DEFAULT_FORM_VALUES[field_name]))
 
 
-def _money(value: float) -> str:
-    return f"{value:.2f} руб."
+def _money(value: float | None) -> str:
+    return "—" if value is None else f"{value:.2f} руб."
 
 
-def _build_form_data_for_month(
-    month_key: str,
-    existing_form_data: dict[str, str] | None = None,
-) -> dict[str, str]:
+def _number(value: float | None, unit: str = "") -> str:
+    if value is None:
+        return "—"
+    suffix = f" {unit}" if unit else ""
+    return f"{value:.2f}{suffix}"
+
+
+def _build_form_data_for_month(month_key: str, existing_form_data: dict[str, str] | None = None) -> dict[str, str]:
     year_value, month_value = month_key.split("-")
     form_data = dict(DEFAULT_FORM_VALUES)
     form_data["calculation_year"] = year_value
@@ -144,74 +172,64 @@ def _build_form_data_for_month(
 
     if existing_form_data:
         for key, value in existing_form_data.items():
-            if key in form_data and key.endswith("_tariff"):
+            if key in form_data:
                 form_data[key] = value
 
-    saved_readings = get_month_readings(month_key)
-    if saved_readings is not None:
-        form_data["cold_water"] = f"{saved_readings.cold_water:.2f}"
-        form_data["hot_water"] = f"{saved_readings.hot_water:.2f}"
-        form_data["electricity_t1"] = f"{saved_readings.electricity_t1:.2f}"
-        form_data["electricity_t2"] = f"{saved_readings.electricity_t2:.2f}"
-        form_data["electricity_t3"] = f"{saved_readings.electricity_t3:.2f}"
+    saved_record = get_month_record(month_key)
+    if saved_record is not None:
+        form_data["cold_water"] = str(int(saved_record.readings.cold_water))
+        form_data["hot_water"] = str(int(saved_record.readings.hot_water))
+        form_data["electricity_t1"] = str(int(saved_record.readings.electricity_t1))
+        form_data["electricity_t2"] = str(int(saved_record.readings.electricity_t2))
+        form_data["electricity_t3"] = str(int(saved_record.readings.electricity_t3))
+        form_data["cold_water_tariff"] = f"{saved_record.tariffs.cold_water:.2f}"
+        form_data["hot_water_tariff"] = f"{saved_record.tariffs.hot_water:.2f}"
+        form_data["wastewater_tariff"] = f"{saved_record.tariffs.wastewater:.2f}"
+        form_data["electricity_t1_tariff"] = f"{saved_record.tariffs.electricity_t1:.2f}"
+        form_data["electricity_t2_tariff"] = f"{saved_record.tariffs.electricity_t2:.2f}"
+        form_data["electricity_t3_tariff"] = f"{saved_record.tariffs.electricity_t3:.2f}"
 
     return form_data
 
 
-def _render_select_options(
-    options: list[tuple[str, str]],
-    selected_value: str,
-) -> str:
-    rendered = []
-    for value, label in options:
-        selected_attr = " selected" if value == selected_value else ""
-        rendered.append(
-            f'<option value="{escape(value)}"{selected_attr}>{escape(label)}</option>'
-        )
-    return "".join(rendered)
+def _render_select_options(options: list[tuple[str, str]], selected_value: str) -> str:
+    return "".join(
+        f'<option value="{escape(value)}"{" selected" if value == selected_value else ""}>{escape(label)}</option>'
+        for value, label in options
+    )
 
 
 def _render_year_options(selected_value: str) -> str:
-    rendered = []
-    for year in YEAR_OPTIONS:
-        selected_attr = " selected" if year == selected_value else ""
-        rendered.append(f'<option value="{escape(year)}"{selected_attr}>{escape(year)}</option>')
-    return "".join(rendered)
+    return "".join(
+        f'<option value="{escape(year)}"{" selected" if year == selected_value else ""}>{escape(year)}</option>'
+        for year in YEAR_OPTIONS
+    )
 
 
 def _render_summary(result: CalculationResult | None, previous_month: str | None) -> str:
     if result is None:
         return """
-        <div class="result-card empty">
+        <div class="card empty-card">
           <div class="eyebrow">Итог</div>
-          <h2>Результаты расчёта</h2>
-          <p>Выберите период, введите текущие показания и сохраните расчёт.</p>
+          <h2>Результат расчёта</h2>
+          <p>Заполните текущие показания и сохраните расчёт. Если прошлый месяц уже есть, локальная версия сразу посчитает расход и сумму.</p>
         </div>
         """
 
     previous_text = (
-        f"<p class=\"muted\">Сравнение с месяцем: <strong>{escape(previous_month)}</strong></p>"
+        f'<p class="muted">Сравнение с прошлым месяцем: <strong>{escape(previous_month)}</strong></p>'
         if previous_month
         else ""
     )
 
     return f"""
-    <div class="result-card">
+    <div class="card">
       <div class="eyebrow">Итог</div>
       <h2>Результаты</h2>
       {previous_text}
-      <div class="result-row">
-        <span>Счёт за воду</span>
-        <strong>{escape(_money(result.water_bill))}</strong>
-      </div>
-      <div class="result-row">
-        <span>Счёт за электричество</span>
-        <strong>{escape(_money(result.electricity_bill))}</strong>
-      </div>
-      <div class="result-row total">
-        <span>Счёт суммарный</span>
-        <strong>{escape(_money(result.total_bill))}</strong>
-      </div>
+      <div class="result-row"><span>Счёт за воду</span><strong>{escape(_money(result.water_bill))}</strong></div>
+      <div class="result-row"><span>Счёт за электричество</span><strong>{escape(_money(result.electricity_bill))}</strong></div>
+      <div class="result-row total"><span>Общий платёж</span><strong>{escape(_money(result.total_bill))}</strong></div>
     </div>
     """
 
@@ -221,362 +239,431 @@ def _render_delta(result: CalculationResult | None) -> str:
         return ""
 
     return f"""
-    <div class="support-card">
+    <div class="card">
       <div class="eyebrow">Расход</div>
-      <div class="delta-list">
-        <div class="delta-item"><span>Холодная вода</span><strong>{escape(f"{result.delta.cold_water:.2f}")}</strong></div>
-        <div class="delta-item"><span>Горячая вода</span><strong>{escape(f"{result.delta.hot_water:.2f}")}</strong></div>
-        <div class="delta-item"><span>Т1</span><strong>{escape(f"{result.delta.electricity_t1:.2f}")}</strong></div>
-        <div class="delta-item"><span>Т2</span><strong>{escape(f"{result.delta.electricity_t2:.2f}")}</strong></div>
-        <div class="delta-item"><span>Т3</span><strong>{escape(f"{result.delta.electricity_t3:.2f}")}</strong></div>
+      <div class="detail-list">
+        <div><span>Холодная вода</span><strong>{escape(_number(result.delta.cold_water, "м3"))}</strong></div>
+        <div><span>Горячая вода</span><strong>{escape(_number(result.delta.hot_water, "м3"))}</strong></div>
+        <div><span>T1</span><strong>{escape(_number(result.delta.electricity_t1, "кВт"))}</strong></div>
+        <div><span>T2</span><strong>{escape(_number(result.delta.electricity_t2, "кВт"))}</strong></div>
+        <div><span>T3</span><strong>{escape(_number(result.delta.electricity_t3, "кВт"))}</strong></div>
       </div>
     </div>
     """
 
 
-def _render_html(
-    form_data: dict[str, str] | None = None,
-    result: CalculationResult | None = None,
-    error_message: str = "",
-    info_message: str = "",
-    previous_month: str | None = None,
-) -> str:
-    error_block = (
-        f'<div class="message error">{escape(error_message)}</div>' if error_message else ""
-    )
-    info_block = (
-        f'<div class="message info">{escape(info_message)}</div>' if info_message else ""
-    )
+def _render_formula_note() -> str:
+    return """
+    <div class="formula-note">
+      Вода = холодная вода × тариф + горячая вода × тариф + (холодная + горячая) × водоотведение.<br />
+      Электричество = T1 × тариф T1 + T2 × тариф T2 + T3 × тариф T3.<br />
+      Расход = текущий месяц − предыдущий месяц.
+    </div>
+    """
 
+
+def _render_chart(series: list[dict[str, object]], unit: str) -> str:
+    if not series:
+        return '<div class="empty-inline">Недостаточно данных для графика.</div>'
+
+    max_value = max(float(item["value"]) for item in series if item.get("value") is not None)
+    bars = []
+    for item in series:
+        value = float(item["value"])
+        height = 8 if max_value == 0 else max((value / max_value) * 100, 8)
+        bars.append(
+            f"""
+            <div class="chart-bar-item">
+              <div class="chart-bar-value">{escape(_number(value, unit))}</div>
+              <div class="chart-bar-track"><div class="chart-bar-fill" style="height: {height:.2f}%"></div></div>
+              <div class="chart-bar-label">{escape(str(item["label"]))}</div>
+            </div>
+            """
+        )
+    return f'<div class="chart-bars">{"".join(bars)}</div>'
+
+
+def _render_history_sidebar(records: list[MonthlyRecord], selected_month_key: str | None) -> str:
+    if not records:
+        return '<div class="card empty-card">История пока пустая. Сохраните хотя бы один месяц.</div>'
+
+    items = []
+    for record in records:
+        active_class = " active" if record.month_key == selected_month_key else ""
+        items.append(
+            f"""
+            <a class="history-link{active_class}" href="/history?month={escape(record.month_key)}">
+              <span>{escape(format_month_label(record.month_key))}</span>
+              <strong>{escape(_money(record.total_bill))}</strong>
+            </a>
+            """
+        )
+    return f'<div class="card history-list">{"".join(items)}</div>'
+
+
+def _render_comparison_cards(comparisons: dict[str, object] | None) -> str:
+    if comparisons is None:
+        return '<div class="empty-inline">Нет данных для сравнений.</div>'
+
+    prev_month = comparisons.get("previous_month")
+    prev_year = comparisons.get("previous_year")
+    prev_month_label = prev_month["label"] if isinstance(prev_month, dict) else "Нет данных"
+    prev_year_label = prev_year["label"] if isinstance(prev_year, dict) else "Нет данных"
+
+    return f"""
+    <div class="stat-grid">
+      <article class="stat-card">
+        <span class="stat-label">К прошлому месяцу</span>
+        <strong>{escape(_money(comparisons.get("previous_month_total_diff")))}</strong>
+        <span class="muted">{escape(str(prev_month_label))}</span>
+      </article>
+      <article class="stat-card">
+        <span class="stat-label">К прошлому году</span>
+        <strong>{escape(_money(comparisons.get("previous_year_total_diff")))}</strong>
+        <span class="muted">{escape(str(prev_year_label))}</span>
+      </article>
+    </div>
+    """
+
+
+def _render_formula_sections(formulas: dict[str, object] | None) -> str:
+    if formulas is None:
+        return '<div class="card empty-card">Для этого месяца ещё нет полного расчёта: отсутствуют данные предыдущего периода.</div>'
+
+    sections = []
+    for title, group_key in (("Вода", "water"), ("Электричество", "electricity")):
+        group = formulas[group_key]
+        parts_html = "".join(
+            f"""
+            <div class="formula-part">
+              <span>{escape(str(part["label"]))}</span>
+              <span>{escape(str(part["expression"]))}</span>
+              <strong>{escape(_money(part["value"]))}</strong>
+            </div>
+            """
+            for part in group["parts"]
+        )
+        sections.append(
+            f"""
+            <section class="card">
+              <h3>{title}</h3>
+              <p class="muted">{escape(str(group["formula"]))}</p>
+              <div class="detail-list formula-parts">{parts_html}</div>
+              <div class="result-row total"><span>Итого</span><strong>{escape(_money(group["total"]))}</strong></div>
+            </section>
+            """
+        )
+    return "".join(sections)
+
+
+def _render_history_detail(selected_record: MonthlyRecord | None, all_records: list[MonthlyRecord]) -> str:
+    if selected_record is None:
+        return '<div class="card empty-card">Выберите месяц из списка слева.</div>'
+
+    comparisons = build_month_comparisons(all_records, selected_record.month_key)
+    formulas = build_month_formulas(selected_record)
+    delta = selected_record.delta
+
+    return f"""
+    <section class="card">
+      <div class="eyebrow">Период</div>
+      <h2>{escape(format_month_label(selected_record.month_key))}</h2>
+      <div class="result-row total"><span>Общий платёж</span><strong>{escape(_money(selected_record.total_bill))}</strong></div>
+    </section>
+
+    {_render_comparison_cards(comparisons)}
+
+    <section class="detail-grid">
+      <article class="card">
+        <h3>Показания</h3>
+        <div class="detail-list">
+          <div><span>Холодная вода</span><strong>{escape(_number(selected_record.readings.cold_water))}</strong></div>
+          <div><span>Горячая вода</span><strong>{escape(_number(selected_record.readings.hot_water))}</strong></div>
+          <div><span>T1</span><strong>{escape(_number(selected_record.readings.electricity_t1))}</strong></div>
+          <div><span>T2</span><strong>{escape(_number(selected_record.readings.electricity_t2))}</strong></div>
+          <div><span>T3</span><strong>{escape(_number(selected_record.readings.electricity_t3))}</strong></div>
+        </div>
+      </article>
+
+      <article class="card">
+        <h3>Тарифы месяца</h3>
+        <div class="detail-list">
+          <div><span>Холодная вода</span><strong>{escape(_money(selected_record.tariffs.cold_water))}</strong></div>
+          <div><span>Горячая вода</span><strong>{escape(_money(selected_record.tariffs.hot_water))}</strong></div>
+          <div><span>Водоотведение</span><strong>{escape(_money(selected_record.tariffs.wastewater))}</strong></div>
+          <div><span>T1</span><strong>{escape(_money(selected_record.tariffs.electricity_t1))}</strong></div>
+          <div><span>T2</span><strong>{escape(_money(selected_record.tariffs.electricity_t2))}</strong></div>
+          <div><span>T3</span><strong>{escape(_money(selected_record.tariffs.electricity_t3))}</strong></div>
+        </div>
+      </article>
+
+      <article class="card">
+        <h3>Расход</h3>
+        <div class="detail-list">
+          <div><span>Холодная вода</span><strong>{escape(_number(delta.cold_water if delta else None, "м3"))}</strong></div>
+          <div><span>Горячая вода</span><strong>{escape(_number(delta.hot_water if delta else None, "м3"))}</strong></div>
+          <div><span>T1</span><strong>{escape(_number(delta.electricity_t1 if delta else None, "кВт"))}</strong></div>
+          <div><span>T2</span><strong>{escape(_number(delta.electricity_t2 if delta else None, "кВт"))}</strong></div>
+          <div><span>T3</span><strong>{escape(_number(delta.electricity_t3 if delta else None, "кВт"))}</strong></div>
+        </div>
+      </article>
+    </section>
+
+    {_render_formula_sections(formulas)}
+    """
+
+
+def _render_base(title: str, body: str, active_page: str) -> str:
+    calc_active = " active" if active_page == "calculator" else ""
+    history_active = " active" if active_page == "history" else ""
     return f"""
 <!doctype html>
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Расчёт коммунальных платежей</title>
+  <title>{escape(title)}</title>
   <style>
     :root {{
-      --md-sys-color-primary: #6750a4;
-      --md-sys-color-on-primary: #ffffff;
-      --md-sys-color-primary-container: #e9ddff;
-      --md-sys-color-on-primary-container: #22005d;
-      --md-sys-color-secondary: #625b71;
-      --md-sys-color-secondary-container: #e8def8;
-      --md-sys-color-tertiary-container: #ffd8e4;
-      --md-sys-color-surface: #fffbfe;
-      --md-sys-color-surface-container: #f3edf7;
-      --md-sys-color-surface-container-high: #ece6f0;
-      --md-sys-color-surface-container-highest: #e6e0e9;
-      --md-sys-color-surface-variant: #e7e0ec;
-      --md-sys-color-outline: #79747e;
-      --md-sys-color-outline-variant: #cac4d0;
-      --md-sys-color-error-container: #f9dedc;
-      --md-sys-color-on-error-container: #410e0b;
-      --md-sys-color-info-container: #d3e3fd;
-      --md-sys-color-on-info-container: #041e49;
-      --md-sys-color-on-surface: #1d1b20;
-      --md-sys-color-on-surface-variant: #49454f;
-      --md-sys-elevation-1: 0 1px 2px rgba(0, 0, 0, 0.12), 0 1px 3px 1px rgba(0, 0, 0, 0.08);
-      --md-sys-elevation-2: 0 2px 6px 2px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.08);
+      --bg: #e7eef5;
+      --surface: rgba(255,255,255,0.96);
+      --surface-strong: #ffffff;
+      --line: #b8c9d8;
+      --text: #13202b;
+      --muted: #42576a;
+      --accent: #0f5f7a;
+      --accent-soft: #d6e8f2;
+      --accent-strong: #0b4256;
+      --shadow: 0 18px 45px rgba(19, 32, 43, 0.10);
     }}
     * {{ box-sizing: border-box; }}
     body {{
       margin: 0;
-      font-family: "Segoe UI", "Roboto", sans-serif;
-      color: var(--md-sys-color-on-surface);
+      font-family: "Segoe UI", sans-serif;
+      color: var(--text);
       background:
-        radial-gradient(circle at top left, rgba(233, 221, 255, 0.9) 0, transparent 28%),
-        radial-gradient(circle at bottom right, rgba(255, 216, 228, 0.7) 0, transparent 24%),
-        var(--md-sys-color-surface);
+        radial-gradient(circle at top left, rgba(188, 212, 230, 0.55), transparent 24%),
+        radial-gradient(circle at bottom right, rgba(171, 198, 220, 0.5), transparent 22%),
+        linear-gradient(180deg, #eef4f8 0%, #dde8f1 100%);
     }}
-    .page {{
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 32px 20px 56px;
-    }}
+    .page {{ max-width: 1280px; margin: 0 auto; padding: 28px 18px 56px; }}
     .hero {{
-      margin-bottom: 24px;
-      padding: 32px;
+      padding: 28px;
       border-radius: 28px;
-      background: linear-gradient(
-        135deg,
-        var(--md-sys-color-primary-container),
-        var(--md-sys-color-tertiary-container)
-      );
-      box-shadow: var(--md-sys-elevation-1);
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.99), rgba(223, 236, 245, 0.96));
+      border: 1px solid rgba(184, 201, 216, 0.9);
+      box-shadow: var(--shadow);
     }}
-    h1 {{
-      margin: 0 0 10px;
-      font-size: 3rem;
-      line-height: 1.1;
-      letter-spacing: -0.02em;
+    .hero h1 {{ margin: 8px 0 10px; font-size: clamp(2rem, 4vw, 3.3rem); }}
+    .hero p {{ margin: 0; max-width: 900px; color: var(--muted); line-height: 1.6; }}
+    .topbar {{ display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }}
+    .nav-link {{
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      padding: 11px 18px;
+      text-decoration: none;
+      color: var(--accent-strong);
+      background: rgba(255,255,255,0.6);
+      border: 1px solid var(--line);
+      font-weight: 600;
     }}
-    .hero p {{
-      margin: 0;
-      max-width: 860px;
-      font-size: 1rem;
-      line-height: 1.5;
-      color: var(--md-sys-color-on-surface-variant);
+    .nav-link.active {{ background: var(--accent); color: white; border-color: var(--accent); }}
+    .layout, .history-layout {{ display: grid; gap: 22px; margin-top: 22px; align-items: start; }}
+    .layout {{ grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr); }}
+    .history-layout {{ grid-template-columns: minmax(240px, 0.34fr) minmax(0, 1fr); }}
+    .card {{
+      background: var(--surface);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(184, 201, 216, 0.85);
+      border-radius: 24px;
+      padding: 22px;
+      box-shadow: var(--shadow);
     }}
-    .layout {{
-      display: grid;
-      grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.85fr);
-      gap: 24px;
-      align-items: start;
-    }}
-    .card, .result-card, .support-card {{
-      background: var(--md-sys-color-surface-container);
-      border: 1px solid var(--md-sys-color-outline-variant);
-      border-radius: 28px;
-      padding: 24px;
-      box-shadow: var(--md-sys-elevation-1);
-    }}
-    .result-card.empty {{
-      color: var(--md-sys-color-on-surface-variant);
-    }}
-    .grid {{
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 16px;
-    }}
-    .eyebrow {{
-      margin-bottom: 8px;
-      font-size: 0.75rem;
-      font-weight: 700;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: var(--md-sys-color-primary);
-    }}
-    .section-title {{
-      margin: 0 0 16px;
-      font-size: 1.75rem;
-      line-height: 1.2;
-    }}
-    .section-note {{
-      margin: 0 0 18px;
-      color: var(--md-sys-color-on-surface-variant);
-    }}
-    label {{
-      display: block;
-      margin-bottom: 8px;
-      font-size: 0.875rem;
-      font-weight: 500;
-      color: var(--md-sys-color-on-surface-variant);
-    }}
+    .empty-card, .empty-inline {{ color: var(--muted); }}
+    .eyebrow {{ color: var(--accent); text-transform: uppercase; letter-spacing: 0.12em; font-size: 0.76rem; font-weight: 700; }}
+    .section-title {{ margin: 8px 0; font-size: 1.9rem; }}
+    .section-note, .muted {{ color: var(--muted); }}
+    .grid, .stat-grid, .detail-grid {{ display: grid; gap: 14px; }}
+    .grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+    .stat-grid {{ grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 18px; }}
+    .detail-grid {{ grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 18px 0; }}
+    label {{ display: block; margin-bottom: 8px; color: var(--muted); font-weight: 600; }}
     input, select {{
       width: 100%;
-      border: 1px solid var(--md-sys-color-outline);
       border-radius: 16px;
-      padding: 16px;
+      border: 1px solid var(--line);
+      background: var(--surface-strong);
+      padding: 14px 15px;
       font-size: 1rem;
-      background: var(--md-sys-color-surface);
-      color: var(--md-sys-color-on-surface);
-      outline: none;
-      transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+      color: var(--text);
     }}
-    input:focus, select:focus {{
-      border-color: var(--md-sys-color-primary);
-      box-shadow: 0 0 0 3px rgba(103, 80, 164, 0.15);
+    input:focus, select:focus {{ outline: 2px solid rgba(15,118,110,0.18); border-color: var(--accent); }}
+    .period-field {{
+      padding: 16px;
+      border-radius: 20px;
+      background: linear-gradient(180deg, #d9e8f2, #cfe1ee);
+      border: 1px solid #aac2d3;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.65);
     }}
-    .full {{
-      grid-column: 1 / -1;
+    .period-field label {{
+      color: var(--accent-strong);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 0.78rem;
     }}
-    .tariff-header {{
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      grid-column: 1 / -1;
-      margin-top: 8px;
-      padding-top: 8px;
+    .period-field select {{
+      background: rgba(255,255,255,0.96);
+      border: 1px solid #95b2c5;
+      font-weight: 700;
+      color: var(--accent-strong);
     }}
-    .tariff-actions {{
-      display: flex;
-      gap: 10px;
-      align-items: center;
-    }}
-    .tariff-header h3 {{
-      margin: 0;
-      font-size: 1.125rem;
-      color: var(--md-sys-color-on-surface);
-    }}
-    .tariff-toggle {{
-      padding: 10px 18px;
-      font-size: 0.875rem;
-      color: var(--md-sys-color-primary);
-      background: var(--md-sys-color-primary-container);
-      box-shadow: none;
-    }}
-    .tariff-collapse-toggle {{
-      color: var(--md-sys-color-on-surface-variant);
-      background: var(--md-sys-color-surface-container-high);
-      border: 1px solid var(--md-sys-color-outline-variant);
-    }}
-    .tariff-section.collapsed {{
-      display: none;
-    }}
-    .readonly-input {{
-      background: var(--md-sys-color-surface-container-high);
-      color: var(--md-sys-color-on-surface-variant);
-      border-color: var(--md-sys-color-outline-variant);
-    }}
-    .actions {{
-      margin-top: 24px;
-    }}
+    .readonly-input {{ background: #f0ece6; color: #7b6d5f; }}
+    .full {{ grid-column: 1 / -1; }}
+    .actions {{ margin-top: 22px; display: flex; gap: 12px; flex-wrap: wrap; }}
     button {{
       border: 0;
       border-radius: 999px;
-      padding: 14px 24px;
-      font-size: 0.95rem;
-      font-weight: 600;
+      padding: 14px 22px;
+      background: var(--accent);
+      color: white;
+      font-weight: 700;
       cursor: pointer;
-      color: var(--md-sys-color-on-primary);
-      background: var(--md-sys-color-primary);
-      box-shadow: var(--md-sys-elevation-1);
-      transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
     }}
-    button:hover {{
-      transform: translateY(-1px);
-      box-shadow: var(--md-sys-elevation-2);
-    }}
-    .message {{
-      margin-bottom: 16px;
-      padding: 14px 16px;
-      border-radius: 20px;
-      border: 1px solid transparent;
-    }}
-    .error {{
-      background: var(--md-sys-color-error-container);
-      color: var(--md-sys-color-on-error-container);
-    }}
-    .info {{
-      background: var(--md-sys-color-info-container);
-      color: var(--md-sys-color-on-info-container);
-    }}
-    .result-row {{
+    .ghost-button {{ background: rgba(255,255,255,0.6); color: var(--accent-strong); border: 1px solid var(--line); }}
+    .message {{ border-radius: 18px; padding: 14px 16px; margin-bottom: 14px; }}
+    .message.error {{ background: #fce7e7; color: #8a1c1c; }}
+    .message.info {{ background: #dbeaf3; color: var(--accent-strong); }}
+    .result-row, .detail-list div, .formula-part, .history-link {{
       display: flex;
       justify-content: space-between;
-      gap: 16px;
+      gap: 14px;
       align-items: center;
-      padding: 16px 0;
-      border-bottom: 1px solid var(--md-sys-color-outline-variant);
-      font-size: 1rem;
+      padding: 12px 0;
+      border-bottom: 1px solid rgba(106, 88, 72, 0.12);
     }}
-    .result-row.total {{
-      border-bottom: 0;
-      font-size: 1.2rem;
+    .result-row.total {{ border-bottom: 0; font-size: 1.08rem; }}
+    .detail-list div:last-child, .formula-part:last-child {{ border-bottom: 0; }}
+    .formula-note {{ margin-top: 18px; padding: 18px; border-radius: 20px; background: #dceaf2; color: #28495e; line-height: 1.7; }}
+    .history-list {{ padding-top: 10px; }}
+    .history-link {{ text-decoration: none; color: inherit; padding: 14px 0; }}
+    .history-link.active {{ color: var(--accent-strong); }}
+    .stat-card {{
+      background: var(--surface);
+      border-radius: 20px;
+      padding: 18px;
+      border: 1px solid rgba(184, 201, 216, 0.85);
+      box-shadow: var(--shadow);
     }}
-    .support-card {{
-      margin-top: 18px;
+    .stat-card strong {{ display: block; margin-top: 8px; font-size: 1.3rem; }}
+    .stat-label {{ color: var(--muted); font-size: 0.9rem; }}
+    .chart-panel {{ margin-bottom: 18px; }}
+    .chart-bars {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 14px; align-items: end; min-height: 240px; }}
+    .chart-bar-item {{ display: grid; gap: 8px; align-items: end; }}
+    .chart-bar-track {{
+      height: 160px;
+      border-radius: 18px;
+      background: linear-gradient(180deg, rgba(15,95,122,0.10), rgba(15,95,122,0.22));
+      display: flex;
+      align-items: end;
+      overflow: hidden;
     }}
-    .formula-note {{
-      margin-top: 18px;
-      padding: 20px;
-      border-radius: 24px;
-      background: var(--md-sys-color-secondary-container);
-      color: var(--md-sys-color-on-surface-variant);
-      font-size: 0.9rem;
-      line-height: 1.6;
-    }}
-    .delta-list {{
-      display: grid;
-      gap: 12px;
-    }}
-    .delta-item {{
+    .chart-bar-fill {{ width: 100%; border-radius: 18px; background: linear-gradient(180deg, #2f89aa, #0f5f7a); }}
+    .chart-bar-value, .chart-bar-label {{ text-align: center; font-size: 0.86rem; color: var(--muted); }}
+    .tariff-header {{
+      grid-column: 1 / -1;
       display: flex;
       justify-content: space-between;
+      align-items: center;
       gap: 12px;
-      padding: 12px 0;
-      border-bottom: 1px solid var(--md-sys-color-outline-variant);
-      color: var(--md-sys-color-on-surface-variant);
+      margin-top: 6px;
     }}
-    .delta-item:last-child {{
-      border-bottom: 0;
-      padding-bottom: 0;
-    }}
-    .muted {{
-      margin: 0 0 10px;
-      color: var(--md-sys-color-on-surface-variant);
-      font-size: 0.875rem;
-    }}
-    @media (max-width: 860px) {{
-      .layout {{
-        grid-template-columns: 1fr;
-      }}
-      .grid {{
-        grid-template-columns: 1fr;
-      }}
-      h1 {{
-        font-size: 2.25rem;
-      }}
-      .tariff-header {{
-        align-items: start;
-        flex-direction: column;
-      }}
-      .tariff-actions {{
-        width: 100%;
-        flex-wrap: wrap;
-      }}
+    .tariff-actions {{ display: flex; gap: 10px; flex-wrap: wrap; }}
+    .tariff-section.collapsed {{ display: none; }}
+    @media (max-width: 980px) {{
+      .layout, .history-layout, .stat-grid, .detail-grid {{ grid-template-columns: 1fr; }}
+      .grid {{ grid-template-columns: 1fr; }}
     }}
   </style>
 </head>
 <body>
   <div class="page">
     <section class="hero">
-      <div class="eyebrow">Material Design 3</div>
-      <h1>Расчёт коммунальных платежей</h1>
-      <p>Выберите месяц, введите текущие показания счётчиков. Приложение сохранит их локально, найдёт предыдущий месяц и посчитает расход как разницу между текущими и предыдущими показаниями.</p>
+      <div class="eyebrow">Local ZHKH</div>
+      <h1>Локальный расчёт ЖКХ с историей расходов</h1>
+      <p>Эта версия не зависит от Netlify: данные сохраняются в локальный JSON-файл, а экран истории и аналитики работает прямо на вашей машине.</p>
+      <div class="topbar">
+        <a href="/" class="nav-link{calc_active}">Калькулятор</a>
+        <a href="/history" class="nav-link{history_active}">История и аналитика</a>
+      </div>
     </section>
+    {body}
+  </div>
+</body>
+</html>
+"""
 
+
+def _render_calculator_page(
+    form_data: dict[str, str] | None = None,
+    result: CalculationResult | None = None,
+    error_message: str = "",
+    info_message: str = "",
+    previous_month: str | None = None,
+    selected_month_key: str | None = None,
+) -> str:
+    error_block = f'<div class="message error">{escape(error_message)}</div>' if error_message else ""
+    info_block = f'<div class="message info">{escape(info_message)}</div>' if info_message else ""
+    selected_history_link = f'/history?month={escape(selected_month_key)}' if selected_month_key else "/history"
+
+    body = f"""
     <div class="layout">
       <section class="card">
         <div class="eyebrow">Ввод данных</div>
         <h2 class="section-title">Параметры расчёта</h2>
-        <p class="section-note">Сначала выберите месяц, затем введите текущие показания счётчиков. Тарифы предзаполнены и заблокированы.</p>
+        <p class="section-note">Выберите месяц, внесите текущие показания и при необходимости скорректируйте тарифы для конкретного периода.</p>
         {error_block}
         {info_block}
-        <form method="post" id="calc-form">
+        <form method="post">
           <div class="grid">
-            <div>
+            <div class="period-field">
               <label for="calculation_year">Год расчёта</label>
-              <select id="calculation_year" name="calculation_year">
-                {_render_year_options(_value(form_data, "calculation_year"))}
-              </select>
+              <select id="calculation_year" name="calculation_year">{_render_year_options(_value(form_data, "calculation_year"))}</select>
             </div>
-            <div>
+            <div class="period-field">
               <label for="calculation_month">Месяц расчёта</label>
-              <select id="calculation_month" name="calculation_month">
-                {_render_select_options(MONTH_OPTIONS, _value(form_data, "calculation_month"))}
-              </select>
+              <select id="calculation_month" name="calculation_month">{_render_select_options(MONTH_OPTIONS, _value(form_data, "calculation_month"))}</select>
             </div>
             <div>
               <label for="cold_water">Холодная вода</label>
-              <input id="cold_water" name="cold_water" type="number" step="0.01" min="0" value="{_value(form_data, "cold_water")}" />
+              <input id="cold_water" name="cold_water" type="number" step="1" min="0" inputmode="numeric" value="{_value(form_data, "cold_water")}" />
             </div>
             <div>
               <label for="hot_water">Горячая вода</label>
-              <input id="hot_water" name="hot_water" type="number" step="0.01" min="0" value="{_value(form_data, "hot_water")}" />
+              <input id="hot_water" name="hot_water" type="number" step="1" min="0" inputmode="numeric" value="{_value(form_data, "hot_water")}" />
             </div>
             <div>
-              <label for="electricity_t1">Т1</label>
-              <input id="electricity_t1" name="electricity_t1" type="number" step="0.01" min="0" value="{_value(form_data, "electricity_t1")}" />
+              <label for="electricity_t1">T1</label>
+              <input id="electricity_t1" name="electricity_t1" type="number" step="1" min="0" inputmode="numeric" value="{_value(form_data, "electricity_t1")}" />
             </div>
             <div>
-              <label for="electricity_t2">Т2</label>
-              <input id="electricity_t2" name="electricity_t2" type="number" step="0.01" min="0" value="{_value(form_data, "electricity_t2")}" />
+              <label for="electricity_t2">T2</label>
+              <input id="electricity_t2" name="electricity_t2" type="number" step="1" min="0" inputmode="numeric" value="{_value(form_data, "electricity_t2")}" />
             </div>
             <div>
-              <label for="electricity_t3">Т3</label>
-              <input id="electricity_t3" name="electricity_t3" type="number" step="0.01" min="0" value="{_value(form_data, "electricity_t3")}" />
+              <label for="electricity_t3">T3</label>
+              <input id="electricity_t3" name="electricity_t3" type="number" step="1" min="0" inputmode="numeric" value="{_value(form_data, "electricity_t3")}" />
             </div>
+
             <div class="tariff-header">
-              <h3>Тарифы</h3>
+              <h3>Тарифы месяца</h3>
               <div class="tariff-actions">
-                <button type="button" id="collapse-tariffs" class="tariff-toggle tariff-collapse-toggle">Развернуть тарифы</button>
-                <button type="button" id="toggle-tariffs" class="tariff-toggle">Изменить тарифы</button>
+                <button type="button" class="ghost-button" id="collapse-tariffs">Развернуть тарифы</button>
+                <button type="button" class="ghost-button" id="toggle-tariffs">Редактировать тарифы</button>
               </div>
             </div>
+
             <div class="tariff-section collapsed">
               <label for="cold_water_tariff">Тариф холодной воды</label>
               <input id="cold_water_tariff" class="tariff-input readonly-input" name="cold_water_tariff" type="number" step="0.01" min="0" readonly value="{_value(form_data, "cold_water_tariff")}" />
@@ -590,20 +677,21 @@ def _render_html(
               <input id="wastewater_tariff" class="tariff-input readonly-input" name="wastewater_tariff" type="number" step="0.01" min="0" readonly value="{_value(form_data, "wastewater_tariff")}" />
             </div>
             <div class="tariff-section collapsed">
-              <label for="electricity_t1_tariff">Тариф электроэнергии 1</label>
+              <label for="electricity_t1_tariff">Тариф электроэнергии T1</label>
               <input id="electricity_t1_tariff" class="tariff-input readonly-input" name="electricity_t1_tariff" type="number" step="0.01" min="0" readonly value="{_value(form_data, "electricity_t1_tariff")}" />
             </div>
             <div class="tariff-section collapsed">
-              <label for="electricity_t2_tariff">Тариф электроэнергии 2</label>
+              <label for="electricity_t2_tariff">Тариф электроэнергии T2</label>
               <input id="electricity_t2_tariff" class="tariff-input readonly-input" name="electricity_t2_tariff" type="number" step="0.01" min="0" readonly value="{_value(form_data, "electricity_t2_tariff")}" />
             </div>
             <div class="full tariff-section collapsed">
-              <label for="electricity_t3_tariff">Тариф электроэнергии 3</label>
+              <label for="electricity_t3_tariff">Тариф электроэнергии T3</label>
               <input id="electricity_t3_tariff" class="tariff-input readonly-input" name="electricity_t3_tariff" type="number" step="0.01" min="0" readonly value="{_value(form_data, "electricity_t3_tariff")}" />
             </div>
           </div>
           <div class="actions">
             <button type="submit">Сохранить и рассчитать</button>
+            <a href="{selected_history_link}" class="nav-link">Открыть историю</a>
           </div>
         </form>
       </section>
@@ -611,97 +699,181 @@ def _render_html(
       <aside>
         {_render_summary(result, previous_month)}
         {_render_delta(result)}
-        <div class="formula-note">
-          Формулы сейчас такие:<br />
-          Вода = расход холодной воды * тариф холодной воды + расход горячей воды * тариф горячей воды + (расход холодной воды + расход горячей воды) * тариф водоотведения.<br />
-          Электричество = сумма по трём тарифным зонам.<br />
-          Расход = текущий месяц - предыдущий месяц.
-        </div>
+        {_render_formula_note()}
       </aside>
     </div>
-  </div>
-  <script>
-    const toggleButton = document.getElementById("toggle-tariffs");
-    const collapseButton = document.getElementById("collapse-tariffs");
-    const tariffInputs = document.querySelectorAll(".tariff-input");
-    const tariffSections = document.querySelectorAll(".tariff-section");
-    const calculationYear = document.getElementById("calculation_year");
-    const calculationMonth = document.getElementById("calculation_month");
-    let tariffsEditable = false;
-    let tariffsCollapsed = true;
+    <script>
+      const toggleButton = document.getElementById("toggle-tariffs");
+      const collapseButton = document.getElementById("collapse-tariffs");
+      const tariffInputs = document.querySelectorAll(".tariff-input");
+      const tariffSections = document.querySelectorAll(".tariff-section");
+      const calculationYear = document.getElementById("calculation_year");
+      const calculationMonth = document.getElementById("calculation_month");
+      let tariffsEditable = false;
+      let tariffsCollapsed = true;
 
-    toggleButton.addEventListener("click", function () {{
-      tariffsEditable = !tariffsEditable;
-      tariffInputs.forEach(function (input) {{
-        input.readOnly = !tariffsEditable;
-        input.classList.toggle("readonly-input", !tariffsEditable);
+      toggleButton.addEventListener("click", function () {{
+        tariffsEditable = !tariffsEditable;
+        tariffInputs.forEach(function (input) {{
+          input.readOnly = !tariffsEditable;
+          input.classList.toggle("readonly-input", !tariffsEditable);
+        }});
+        toggleButton.textContent = tariffsEditable ? "Зафиксировать тарифы" : "Редактировать тарифы";
       }});
-      toggleButton.textContent = tariffsEditable ? "Заблокировать тарифы" : "Изменить тарифы";
-    }});
 
-    collapseButton.addEventListener("click", function () {{
-      tariffsCollapsed = !tariffsCollapsed;
-      tariffSections.forEach(function (section) {{
-        section.classList.toggle("collapsed", tariffsCollapsed);
+      collapseButton.addEventListener("click", function () {{
+        tariffsCollapsed = !tariffsCollapsed;
+        tariffSections.forEach(function (section) {{
+          section.classList.toggle("collapsed", tariffsCollapsed);
+        }});
+        collapseButton.textContent = tariffsCollapsed ? "Развернуть тарифы" : "Свернуть тарифы";
       }});
-      collapseButton.textContent = tariffsCollapsed ? "Развернуть тарифы" : "Свернуть тарифы";
-    }});
 
-    function reloadMonthData() {{
-      const params = new URLSearchParams();
-      params.set("calculation_year", calculationYear.value);
-      params.set("calculation_month", calculationMonth.value);
-      window.location.search = params.toString();
-    }}
+      function reloadMonthData() {{
+        const params = new URLSearchParams();
+        params.set("calculation_year", calculationYear.value);
+        params.set("calculation_month", calculationMonth.value);
+        window.location.search = params.toString();
+      }}
 
-    calculationYear.addEventListener("change", reloadMonthData);
-    calculationMonth.addEventListener("change", reloadMonthData);
-  </script>
-</body>
-</html>
-"""
+      calculationYear.addEventListener("change", reloadMonthData);
+      calculationMonth.addEventListener("change", reloadMonthData);
+    </script>
+    """
+    return _render_base("Локальный расчёт ЖКХ", body, "calculator")
 
 
-def application(environ, start_response):
+def _render_history_page(selected_month_key: str | None = None) -> str:
+    records = list_history_records()
+    analytics = build_history_analytics(records)
+
+    if selected_month_key is None and records:
+        selected_month_key = records[0].month_key
+
+    selected_record = next((record for record in records if record.month_key == selected_month_key), None)
+    averages = analytics["averages"]
+    most_expensive = analytics["most_expensive_month"]
+    avg_water_total = (
+        (averages["cold_water"] or 0) + (averages["hot_water"] or 0)
+        if averages["cold_water"] is not None and averages["hot_water"] is not None
+        else None
+    )
+
+    body = f"""
+    <div class="history-layout">
+      <aside>
+        {_render_history_sidebar(records, selected_month_key)}
+      </aside>
+      <section>
+        <div class="stat-grid">
+          <article class="stat-card">
+            <span class="stat-label">Средний платёж</span>
+            <strong>{escape(_money(averages["total_bill"]))}</strong>
+          </article>
+          <article class="stat-card">
+            <span class="stat-label">Средний счёт за воду</span>
+            <strong>{escape(_money(averages["water_bill"]))}</strong>
+          </article>
+          <article class="stat-card">
+            <span class="stat-label">Средний счёт за электричество</span>
+            <strong>{escape(_money(averages["electricity_bill"]))}</strong>
+          </article>
+          <article class="stat-card">
+            <span class="stat-label">Средний расход воды</span>
+            <strong>{escape(_number(avg_water_total, "м3"))}</strong>
+          </article>
+          <article class="stat-card">
+            <span class="stat-label">Средний расход электричества</span>
+            <strong>{escape(_number(averages["electricity_total"], "кВт"))}</strong>
+          </article>
+          <article class="stat-card">
+            <span class="stat-label">Самый дорогой месяц</span>
+            <strong>{escape(f"{most_expensive['label']} • {_money(most_expensive['total_bill'])}" if most_expensive else "—")}</strong>
+          </article>
+        </div>
+
+        <section class="card chart-panel">
+          <div class="eyebrow">График</div>
+          <h2>Общий платёж по месяцам</h2>
+          {_render_chart(analytics["total_payment_chart"], "руб.")}
+        </section>
+
+        <section class="card chart-panel">
+          <div class="eyebrow">График</div>
+          <h2>Расход воды</h2>
+          {_render_chart(analytics["water_consumption_chart"], "м3")}
+        </section>
+
+        <section class="card chart-panel">
+          <div class="eyebrow">График</div>
+          <h2>Расход электричества</h2>
+          {_render_chart(analytics["electricity_consumption_chart"], "кВт")}
+        </section>
+
+        {_render_history_detail(selected_record, records)}
+      </section>
+    </div>
+    """
+    return _render_base("История и аналитика ЖКХ", body, "history")
+
+
+def _parse_query(environ: dict[str, object]) -> dict[str, str]:
+    query_string = str(environ.get("QUERY_STRING", ""))
+    parsed_query = parse_qs(query_string)
+    return {key: values[0] for key, values in parsed_query.items()}
+
+
+def _saved_result(record: MonthlyRecord | None) -> CalculationResult | None:
+    if record is None or record.delta is None or record.total_bill is None:
+        return None
+
+    return CalculationResult(
+        water_bill=record.water_bill or 0.0,
+        electricity_bill=record.electricity_bill or 0.0,
+        total_bill=record.total_bill or 0.0,
+        delta=record.delta,
+    )
+
+
+def _handle_calculator(environ: dict[str, object]) -> str:
     form_data: dict[str, str] | None = dict(DEFAULT_FORM_VALUES)
     result: CalculationResult | None = None
     error_message = ""
     info_message = ""
     previous_month: str | None = None
+    selected_month_key: str | None = None
 
     if environ.get("REQUEST_METHOD") == "GET":
-        query_string = environ.get("QUERY_STRING", "")
-        parsed_query = parse_qs(query_string)
-        query_data = {key: values[0] for key, values in parsed_query.items()}
-
+        query_data = _parse_query(environ)
         if "calculation_year" in query_data and "calculation_month" in query_data:
             try:
-                month_key = _parse_month_key(query_data)
-                form_data = _build_form_data_for_month(month_key)
-                if get_month_readings(month_key) is not None:
-                    info_message = f"Загружены сохранённые показания за {month_key}."
+                selected_month_key = _parse_month_key(query_data)
+                form_data = _build_form_data_for_month(selected_month_key)
+                saved_record = get_month_record(selected_month_key)
+                if saved_record is not None:
+                    info_message = f"Загружены локально сохранённые данные за {selected_month_key}."
+                    result = _saved_result(saved_record)
             except ValueError as error:
                 error_message = str(error)
 
     if environ.get("REQUEST_METHOD") == "POST":
-        content_length = int(environ.get("CONTENT_LENGTH", "0") or "0")
+        content_length = int(str(environ.get("CONTENT_LENGTH", "0")) or "0")
         raw_body = environ["wsgi.input"].read(content_length).decode(ENCODING)
         parsed = parse_qs(raw_body)
         form_data = {key: values[0] for key, values in parsed.items()}
 
         try:
-            month_key = _parse_month_key(form_data)
+            selected_month_key = _parse_month_key(form_data)
             readings = _build_readings(form_data)
             tariffs = _build_tariffs(form_data)
-            previous_month, previous_readings = get_previous_month_readings(month_key)
-
-            save_month_readings(month_key, readings)
+            previous_month, previous_readings = get_previous_month_readings(selected_month_key)
 
             if previous_readings is None:
-                form_data = _build_form_data_for_month(month_key, form_data)
+                save_month_record(selected_month_key, readings, tariffs, None)
+                form_data = _build_form_data_for_month(selected_month_key, form_data)
                 info_message = (
-                    f"Показания за {month_key} сохранены. Для расчёта нужны данные за "
-                    f"предыдущий месяц: {previous_month}."
+                    f"Показания за {selected_month_key} сохранены локально. Для полного расчёта нужен предыдущий месяц: "
+                    f"{previous_month}."
                 )
             else:
                 result = calculate_totals(
@@ -711,18 +883,31 @@ def application(environ, start_response):
                         tariffs=tariffs,
                     )
                 )
-                form_data = _build_form_data_for_month(month_key, form_data)
-                info_message = f"Показания за {month_key} сохранены."
+                save_month_record(selected_month_key, readings, tariffs, result)
+                form_data = _build_form_data_for_month(selected_month_key, form_data)
+                info_message = f"Показания и расчёт за {selected_month_key} сохранены локально."
         except ValueError as error:
             error_message = str(error)
 
-    html = _render_html(
+    return _render_calculator_page(
         form_data=form_data,
         result=result,
         error_message=error_message,
         info_message=info_message,
         previous_month=previous_month,
+        selected_month_key=selected_month_key,
     )
+
+
+def application(environ, start_response):
+    path = str(environ.get("PATH_INFO", "/") or "/")
+
+    if path == "/history":
+        query = _parse_query(environ)
+        html = _render_history_page(query.get("month"))
+    else:
+        html = _handle_calculator(environ)
+
     start_response("200 OK", [("Content-Type", f"text/html; charset={ENCODING}")])
     return [html.encode(ENCODING)]
 

@@ -1,16 +1,52 @@
 {
   "2026-01": {
-    "cold_water": 462.0,
-    "hot_water": 162.0,
-    "electricity_t1": 1693.0,
-    "electricity_t2": 727.0,
-    "electricity_t3": 2207.0
+    "readings": {
+      "cold_water": 462.0,
+      "hot_water": 162.0,
+      "electricity_t1": 1693.0,
+      "electricity_t2": 727.0,
+      "electricity_t3": 2207.0
+    },
+    "tariffs": {
+      "cold_water": 65.77,
+      "hot_water": 312.5,
+      "wastewater": 51.62,
+      "electricity_t1": 10.23,
+      "electricity_t2": 3.71,
+      "electricity_t3": 7.16
+    },
+    "delta": null,
+    "water_bill": null,
+    "electricity_bill": null,
+    "total_bill": null,
+    "updated_at": "2026-03-15T19:01:39Z"
   },
   "2026-02": {
-    "cold_water": 464.0,
-    "hot_water": 165.0,
-    "electricity_t1": 1700.0,
-    "electricity_t2": 737.0,
-    "electricity_t3": 2217.0
+    "readings": {
+      "cold_water": 464.0,
+      "hot_water": 165.0,
+      "electricity_t1": 1700.0,
+      "electricity_t2": 737.0,
+      "electricity_t3": 2217.0
+    },
+    "tariffs": {
+      "cold_water": 65.77,
+      "hot_water": 312.5,
+      "wastewater": 51.62,
+      "electricity_t1": 10.23,
+      "electricity_t2": 3.71,
+      "electricity_t3": 7.16
+    },
+    "delta": {
+      "cold_water": 2.0,
+      "hot_water": 3.0,
+      "electricity_t1": 7.0,
+      "electricity_t2": 10.0,
+      "electricity_t3": 10.0
+    },
+    "water_bill": 1327.1399999999999,
+    "electricity_bill": 180.31,
+    "total_bill": 1507.4499999999998,
+    "updated_at": "2026-03-15T19:02:14Z"
   }
 }
