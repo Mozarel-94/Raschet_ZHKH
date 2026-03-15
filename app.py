@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-import csv
 import io
+import zipfile
 from datetime import date
 from html import escape
+from pathlib import Path
 from urllib.parse import parse_qs
 from wsgiref.simple_server import make_server
+from xml.sax.saxutils import escape as xml_escape
 
 from calculator import CalculationInputs, CalculationResult, MeterReadings, Tariffs, calculate_totals
 from history_analytics import (
@@ -27,10 +29,23 @@ from storage import (
     list_history_records,
     save_month_record,
 )
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.utils import simpleSplit
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfgen import canvas
 
 HOST = "127.0.0.1"
 PORT = 8000
 ENCODING = "utf-8"
+PDF_FONT_NAME = "ReceiptFont"
+PDF_FONT_CANDIDATES = [
+    Path(r"C:\Windows\Fonts\arial.ttf"),
+    Path(r"C:\Windows\Fonts\tahoma.ttf"),
+    Path(r"C:\Windows\Fonts\verdana.ttf"),
+    Path(r"C:\Windows\Fonts\times.ttf"),
+]
 
 FIELD_LABELS = {
     "calculation_year": "Год расчёта",
@@ -176,6 +191,26 @@ def _format_trend(value: float | None) -> str:
     return f"{sign}{value:.2f} руб."
 
 
+def _find_pdf_font_path() -> Path | None:
+    for candidate in PDF_FONT_CANDIDATES:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _ensure_pdf_font_registered() -> str:
+    font_path = _find_pdf_font_path()
+    if font_path is None:
+        raise RuntimeError("Не найден кириллический шрифт для генерации PDF. Проверьте папку C:\\Windows\\Fonts.")
+
+    try:
+        pdfmetrics.getFont(PDF_FONT_NAME)
+    except KeyError:
+        pdfmetrics.registerFont(TTFont(PDF_FONT_NAME, str(font_path)))
+
+    return PDF_FONT_NAME
+
+
 def _status_class(status: str) -> str:
     return "status-calculated" if status == "Рассчитан" else "status-pending"
 
@@ -216,10 +251,8 @@ def _apply_tariffs_to_form_data(form_data: dict[str, str], tariffs: Tariffs) -> 
     return next_form_data
 
 
-def _build_csv_export(records: list[MonthlyRecord]) -> bytes:
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(
+def _history_export_rows(records: list[MonthlyRecord]) -> list[list[str]]:
+    rows = [
         [
             "month_key",
             "status",
@@ -244,18 +277,18 @@ def _build_csv_export(records: list[MonthlyRecord]) -> bytes:
             "total_bill",
             "updated_at",
         ]
-    )
+    ]
 
     for record in records:
-        writer.writerow(
+        rows.append(
             [
                 record.month_key,
                 month_status(record),
-                int(record.readings.cold_water),
-                int(record.readings.hot_water),
-                int(record.readings.electricity_t1),
-                int(record.readings.electricity_t2),
-                int(record.readings.electricity_t3),
+                str(int(record.readings.cold_water)),
+                str(int(record.readings.hot_water)),
+                str(int(record.readings.electricity_t1)),
+                str(int(record.readings.electricity_t2)),
+                str(int(record.readings.electricity_t3)),
                 f"{record.tariffs.cold_water:.2f}",
                 f"{record.tariffs.hot_water:.2f}",
                 f"{record.tariffs.wastewater:.2f}",
@@ -274,7 +307,325 @@ def _build_csv_export(records: list[MonthlyRecord]) -> bytes:
             ]
         )
 
-    return output.getvalue().encode("utf-8-sig")
+    return rows
+
+
+def _xlsx_cell(cell_ref: str, value: str) -> str:
+    return f'<c r="{cell_ref}" t="inlineStr"><is><t>{xml_escape(value)}</t></is></c>'
+
+
+def _column_name(index: int) -> str:
+    name = ""
+    current = index
+    while current >= 0:
+        current, remainder = divmod(current, 26)
+        name = chr(65 + remainder) + name
+        current -= 1
+    return name
+
+
+def _build_xlsx_export(records: list[MonthlyRecord]) -> bytes:
+    rows = _history_export_rows(records)
+    sheet_rows: list[str] = []
+
+    for row_index, row in enumerate(rows, start=1):
+        cells = "".join(_xlsx_cell(f"{_column_name(column_index)}{row_index}", value) for column_index, value in enumerate(row))
+        sheet_rows.append(f'<row r="{row_index}">{cells}</row>')
+
+    sheet_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        f'<sheetData>{"".join(sheet_rows)}</sheetData>'
+        "</worksheet>"
+    )
+
+    workbook_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        '<sheets><sheet name="History" sheetId="1" r:id="rId1"/></sheets>'
+        "</workbook>"
+    )
+
+    workbook_rels_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" '
+        'Target="worksheets/sheet1.xml"/>'
+        '<Relationship Id="rId2" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" '
+        'Target="styles.xml"/>'
+        "</Relationships>"
+    )
+
+    root_rels_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+        'Target="xl/workbook.xml"/>'
+        "</Relationships>"
+    )
+
+    content_types_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/xl/workbook.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+        '<Override PartName="/xl/worksheets/sheet1.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        '<Override PartName="/xl/styles.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+        "</Types>"
+    )
+
+    styles_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        '<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>'
+        '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>'
+        '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
+        '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+        '<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>'
+        '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
+        "</styleSheet>"
+    )
+
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("[Content_Types].xml", content_types_xml)
+        archive.writestr("_rels/.rels", root_rels_xml)
+        archive.writestr("xl/workbook.xml", workbook_xml)
+        archive.writestr("xl/_rels/workbook.xml.rels", workbook_rels_xml)
+        archive.writestr("xl/worksheets/sheet1.xml", sheet_xml)
+        archive.writestr("xl/styles.xml", styles_xml)
+
+    return output.getvalue()
+
+
+def _receipt_value(value: float | None, unit: str = "") -> str:
+    return _number(value, unit) if unit else (f"{value:.2f}" if value is not None else "—")
+
+
+def _build_receipt_pdf(record: MonthlyRecord) -> bytes:
+    font_name = _ensure_pdf_font_registered()
+    buffer = io.BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=A4)
+    page_width, page_height = A4
+    margin = 28
+    left = margin
+    right = page_width - margin
+    content_width = right - left
+    y = page_height - margin
+    status = month_status(record)
+    formulas = build_month_formulas(record)
+    delta = record.delta
+
+    def draw_paragraph(
+        text: str,
+        x: float,
+        top_y: float,
+        width: float,
+        font_size: int = 10,
+        color=colors.HexColor("#173042"),
+        line_gap: int = 2,
+    ) -> float:
+        pdf.setFont(font_name, font_size)
+        pdf.setFillColor(color)
+        lines = simpleSplit(text, font_name, font_size, width)
+        current_y = top_y
+        for line in lines:
+            pdf.drawString(x, current_y, line)
+            current_y -= font_size + line_gap
+        return current_y
+
+    def draw_box(x: float, top_y: float, width: float, height: float, fill_color, stroke_color, radius: int = 12) -> float:
+        box_bottom = top_y - height
+        pdf.setFillColor(fill_color)
+        pdf.setStrokeColor(stroke_color)
+        pdf.roundRect(x, box_bottom, width, height, radius, fill=1, stroke=1)
+        return box_bottom
+
+    def draw_info_section(
+        title: str,
+        rows: list[tuple[str, str]],
+        x: float,
+        top_y: float,
+        width: float,
+        note: str | None = None,
+    ) -> float:
+        note_lines = len(simpleSplit(note, font_name, 8, width - 20)) if note else 0
+        height = 28 + len(rows) * 14 + note_lines * 10 + 12
+        box_bottom = draw_box(x, top_y, width, height, colors.white, colors.HexColor("#d5e1ea"))
+
+        current_y = top_y - 16
+        pdf.setFont(font_name, 11)
+        pdf.setFillColor(colors.HexColor("#0f5f7a"))
+        pdf.drawString(x + 10, current_y, title)
+        current_y -= 14
+
+        for label, value in rows:
+            pdf.setFont(font_name, 8)
+            pdf.setFillColor(colors.HexColor("#526474"))
+            pdf.drawString(x + 10, current_y, label)
+            text_width = pdf.stringWidth(value, font_name, 9)
+            pdf.setFont(font_name, 9)
+            pdf.setFillColor(colors.HexColor("#173042"))
+            pdf.drawString(x + width - 10 - text_width, current_y, value)
+            current_y -= 14
+
+        if note:
+            current_y -= 1
+            draw_paragraph(
+                note,
+                x + 10,
+                current_y,
+                width - 20,
+                font_size=8,
+                color=colors.HexColor("#526474"),
+                line_gap=1,
+            )
+
+        return box_bottom
+
+    def draw_totals_section(rows: list[tuple[str, str]]) -> None:
+        nonlocal y
+        height = 92
+        box_bottom = draw_box(left, y, content_width, height, colors.HexColor("#0b4256"), colors.HexColor("#0b4256"), radius=16)
+
+        current_y = y - 18
+        pdf.setFont(font_name, 13)
+        pdf.setFillColor(colors.white)
+        pdf.drawString(left + 14, current_y, "Итоги")
+        current_y -= 18
+
+        for index, (label, value) in enumerate(rows):
+            label_font = 9 if index < len(rows) - 1 else 10
+            value_font = 10 if index < len(rows) - 1 else 15
+            pdf.setFont(font_name, label_font)
+            pdf.drawString(left + 14, current_y, label)
+            text_width = pdf.stringWidth(value, font_name, value_font)
+            pdf.setFont(font_name, value_font)
+            pdf.drawString(right - 14 - text_width, current_y, value)
+            current_y -= 18 if index < len(rows) - 1 else 20
+
+        y = box_bottom - 10
+
+    def draw_formula_section(title: str, lines: list[str], top_y: float) -> float:
+        height = 26 + len(lines) * 10 + 10
+        box_bottom = draw_box(left, top_y, content_width, height, colors.HexColor("#f8fbfd"), colors.HexColor("#d5e1ea"))
+
+        current_y = top_y - 15
+        pdf.setFont(font_name, 11)
+        pdf.setFillColor(colors.HexColor("#0f5f7a"))
+        pdf.drawString(left + 10, current_y, title)
+        current_y -= 13
+        for line in lines:
+            current_y = draw_paragraph(line, left + 10, current_y, content_width - 20, font_size=8, line_gap=1)
+
+        return box_bottom
+
+    pdf.setTitle(f"Квитанция {format_month_label(record.month_key)}")
+    pdf.setAuthor("Raschet_ZHKH")
+
+    pdf.setFont(font_name, 17)
+    pdf.setFillColor(colors.HexColor("#0b4256"))
+    pdf.drawString(left, y, "Квитанция / Отчёт за месяц")
+    y -= 22
+    y = draw_paragraph(format_month_label(record.month_key), left, y, content_width, font_size=12, line_gap=1)
+    y -= 4
+    y = draw_paragraph(
+        f"Статус: {status}    Сформировано: {date.today().strftime('%d.%m.%Y')}",
+        left,
+        y,
+        content_width,
+        font_size=8,
+        color=colors.HexColor("#526474"),
+        line_gap=1,
+    )
+    y -= 8
+
+    draw_totals_section(
+        [
+            ("Счёт за воду", _money(record.water_bill)),
+            ("Счёт за электричество", _money(record.electricity_bill)),
+            ("Общий платёж", _money(record.total_bill)),
+        ],
+    )
+
+    column_gap = 10
+    column_width = (content_width - column_gap) / 2
+    top_columns_y = y
+    left_bottom = draw_info_section(
+        "Показания",
+        [
+            ("Холодная вода", f"{record.readings.cold_water:.0f}"),
+            ("Горячая вода", f"{record.readings.hot_water:.0f}"),
+            ("Электроэнергия T1", f"{record.readings.electricity_t1:.0f}"),
+            ("Электроэнергия T2", f"{record.readings.electricity_t2:.0f}"),
+            ("Электроэнергия T3", f"{record.readings.electricity_t3:.0f}"),
+        ],
+        left,
+        top_columns_y,
+        column_width,
+    )
+    right_bottom = draw_info_section(
+        "Расход",
+        [
+            ("Холодная вода", _number(delta.cold_water if delta else None, "м3")),
+            ("Горячая вода", _number(delta.hot_water if delta else None, "м3")),
+            ("Электроэнергия T1", _number(delta.electricity_t1 if delta else None, "кВт")),
+            ("Электроэнергия T2", _number(delta.electricity_t2 if delta else None, "кВт")),
+            ("Электроэнергия T3", _number(delta.electricity_t3 if delta else None, "кВт")),
+        ],
+        left + column_width + column_gap,
+        top_columns_y,
+        column_width,
+        note="Расчёт недоступен: отсутствует предыдущий месяц или полный набор данных." if delta is None else None,
+    )
+    y = min(left_bottom, right_bottom) - 10
+
+    pdf.setFont(font_name, 12)
+    pdf.setFillColor(colors.HexColor("#0b4256"))
+    pdf.drawString(left, y, "Формулы")
+    y -= 10
+
+    if formulas is None:
+        draw_paragraph(
+            "Расчёт недоступен: отсутствует предыдущий месяц или полный набор данных.",
+            left,
+            y,
+            content_width,
+            font_size=9,
+            color=colors.HexColor("#526474"),
+            line_gap=1,
+        )
+    else:
+        water_lines = [
+            str(formulas["water"]["formula"]),
+            *[
+                f'{part["label"]}: {part["expression"]} = {_money(part["value"])}'
+                for part in formulas["water"]["parts"]
+            ],
+            f'Итого: {_money(formulas["water"]["total"])}',
+        ]
+        electricity_lines = [
+            str(formulas["electricity"]["formula"]),
+            *[
+                f'{part["label"]}: {part["expression"]} = {_money(part["value"])}'
+                for part in formulas["electricity"]["parts"]
+            ],
+            f'Итого: {_money(formulas["electricity"]["total"])}',
+        ]
+        water_bottom = draw_formula_section("Вода", water_lines, y)
+        electricity_bottom = draw_formula_section("Электричество", electricity_lines, water_bottom - 8)
+        y = electricity_bottom
+
+    pdf.save()
+    return buffer.getvalue()
 
 
 def _render_select_options(options: list[tuple[str, str]], selected_value: str) -> str:
@@ -572,6 +923,18 @@ def _render_base(title: str, body: str, active_page: str) -> str:
       font-weight: 600;
     }}
     .nav-link.active {{ background: var(--accent); color: white; border-color: var(--accent); }}
+    .export-link {{
+      background: var(--accent);
+      color: #ffffff;
+      border-color: var(--accent);
+      box-shadow: 0 10px 24px rgba(15, 95, 122, 0.22);
+    }}
+    .receipt-link {{
+      background: #0b4256;
+      color: #ffffff;
+      border-color: #0b4256;
+      box-shadow: 0 10px 24px rgba(11, 66, 86, 0.26);
+    }}
     .layout, .history-layout {{ display: grid; gap: 22px; margin-top: 22px; align-items: start; }}
     .layout {{ grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr); }}
     .history-layout {{ grid-template-columns: minmax(240px, 0.34fr) minmax(0, 1fr); }}
@@ -808,7 +1171,7 @@ def _render_calculator_page(
               <label for="electricity_t2_tariff">Тариф электроэнергии T2</label>
               <input id="electricity_t2_tariff" class="tariff-input readonly-input" name="electricity_t2_tariff" type="number" step="0.01" min="0" readonly value="{_value(form_data, "electricity_t2_tariff")}" />
             </div>
-            <div class="full tariff-section collapsed">
+            <div class="tariff-section collapsed">
               <label for="electricity_t3_tariff">Тариф электроэнергии T3</label>
               <input id="electricity_t3_tariff" class="tariff-input readonly-input" name="electricity_t3_tariff" type="number" step="0.01" min="0" readonly value="{_value(form_data, "electricity_t3_tariff")}" />
             </div>
@@ -885,7 +1248,8 @@ def _render_history_page(selected_month_key: str | None = None) -> str:
       </aside>
       <section>
         <div class="actions">
-          <a href="/history/export.csv" class="nav-link">Экспорт CSV</a>
+          {'<a href="/history/receipt.pdf?month=' + escape(selected_month_key) + '" class="nav-link receipt-link">Скачать квитанцию PDF</a>' if selected_month_key else '<span class="nav-link">Выберите месяц для квитанции</span>'}
+          <a href="/history/export.xlsx" class="nav-link export-link">Экспорт XLSX</a>
         </div>
         <div class="stat-grid">
           <article class="stat-card">
@@ -1027,10 +1391,46 @@ def _handle_calculator(environ: dict[str, object]) -> str:
 
 
 def _handle_history_export() -> tuple[str, list[tuple[str, str]], bytes]:
-    payload = _build_csv_export(list_history_records())
+    payload = _build_xlsx_export(list_history_records())
     headers = [
-        ("Content-Type", "text/csv; charset=utf-8"),
-        ("Content-Disposition", 'attachment; filename="zhkh-history.csv"'),
+        (
+            "Content-Type",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ),
+        ("Content-Disposition", 'attachment; filename="zhkh-history.xlsx"'),
+    ]
+    return "200 OK", headers, payload
+
+
+def _handle_receipt_export(query: dict[str, str]) -> tuple[str, list[tuple[str, str]], bytes]:
+    month_key = query.get("month", "").strip()
+    if not month_key:
+        return (
+            "400 Bad Request",
+            [("Content-Type", f"text/plain; charset={ENCODING}")],
+            "Параметр month обязателен для генерации квитанции.".encode(ENCODING),
+        )
+
+    record = get_month_record(month_key)
+    if record is None:
+        return (
+            "404 Not Found",
+            [("Content-Type", f"text/plain; charset={ENCODING}")],
+            f"Месяц {month_key} не найден в локальной истории.".encode(ENCODING),
+        )
+
+    try:
+        payload = _build_receipt_pdf(record)
+    except Exception as error:
+        return (
+            "500 Internal Server Error",
+            [("Content-Type", f"text/plain; charset={ENCODING}")],
+            f"Не удалось сформировать PDF-квитанцию: {error}".encode(ENCODING),
+        )
+
+    headers = [
+        ("Content-Type", "application/pdf"),
+        ("Content-Disposition", f'attachment; filename="zhkh-receipt-{month_key}.pdf"'),
     ]
     return "200 OK", headers, payload
 
@@ -1038,8 +1438,14 @@ def _handle_history_export() -> tuple[str, list[tuple[str, str]], bytes]:
 def application(environ, start_response):
     path = str(environ.get("PATH_INFO", "/") or "/")
 
-    if path == "/history/export.csv":
+    if path == "/history/export.xlsx":
         status, headers, body = _handle_history_export()
+        start_response(status, headers)
+        return [body]
+
+    if path == "/history/receipt.pdf":
+        query = _parse_query(environ)
+        status, headers, body = _handle_receipt_export(query)
         start_response(status, headers)
         return [body]
 
