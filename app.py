@@ -1012,9 +1012,27 @@ def _render_base(title: str, body: str, active_page: str) -> str:
     .result-row.total {{ border-bottom: 0; font-size: 1.08rem; }}
     .detail-list div:last-child, .formula-part:last-child {{ border-bottom: 0; }}
     .formula-note {{ margin-top: 18px; padding: 18px; border-radius: 20px; background: #dceaf2; color: #28495e; line-height: 1.7; }}
-    .history-list {{ padding-top: 10px; }}
-    .history-link {{ text-decoration: none; color: inherit; padding: 14px 0; }}
-    .history-link.active {{ color: var(--accent-strong); }}
+    .history-list {{ padding-top: 10px; display: grid; gap: 10px; }}
+    .history-link {{
+      text-decoration: none;
+      color: inherit;
+      padding: 16px 18px;
+      border: 1px solid rgba(184, 201, 216, 0.85);
+      border-radius: 20px;
+      background: rgba(255,255,255,0.62);
+      transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+    }}
+    .history-link:hover {{
+      background: rgba(232, 242, 248, 0.95);
+      border-color: rgba(15, 95, 122, 0.28);
+      transform: translateY(-1px);
+    }}
+    .history-link.active {{
+      color: var(--accent-strong);
+      background: linear-gradient(135deg, rgba(221, 238, 247, 0.98), rgba(207, 229, 241, 0.98));
+      border-color: rgba(15, 95, 122, 0.55);
+      box-shadow: 0 12px 24px rgba(15, 95, 122, 0.14);
+    }}
     .history-link-main {{ display: grid; gap: 8px; }}
     .history-meta, .detail-meta {{ display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }}
     .detail-meta {{ margin: 10px 0 8px; }}
