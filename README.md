@@ -87,6 +87,29 @@ npx netlify dev
 
 Для локального запуска нужны `SUPABASE_URL`, `SUPABASE_ANON_KEY` и `SUPABASE_SERVICE_ROLE_KEY`.
 
+## Локальный Windows-запуск без установки Python
+
+Для локальной офлайн-версии есть переносимый запуск без дополнительных настроек на целевом компьютере.
+
+Соберите переносимый комплект на машине разработчика:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build_windows_portable.ps1
+```
+
+После этого появятся:
+
+- `dist/Raschet_ZHKH_Windows_Portable/`
+- `dist/Raschet_ZHKH_Windows_Portable.zip`
+
+Внутри комплекта уже лежит встроенный Python, поэтому на другом компьютере под Windows достаточно:
+
+1. распаковать архив или открыть папку `dist/Raschet_ZHKH_Windows_Portable`
+2. запустить `run_local.bat`
+3. открыть `http://127.0.0.1:8000`, если браузер не открылся автоматически
+
+`run_local.bat` сначала ищет встроенный Python в `.portable/python/python.exe`, затем системный Python. Поэтому исходный проект тоже можно запускать как обычно, а переносимый комплект работает без предварительной установки Python.
+
 ## Деплой
 
 1. Запушьте репозиторий на GitHub.

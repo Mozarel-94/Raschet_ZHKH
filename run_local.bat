@@ -3,10 +3,18 @@ setlocal
 
 cd /d "%~dp0"
 
+set "APP_ROOT=%~dp0"
+set "PORTABLE_PYTHON=%APP_ROOT%.portable\python\python.exe"
 set "PYTHON_EXE="
 
-if exist "C:\Users\user\AppData\Local\Programs\Python\Python314\python.exe" (
-  set "PYTHON_EXE=C:\Users\user\AppData\Local\Programs\Python\Python314\python.exe"
+if exist "%PORTABLE_PYTHON%" (
+  set "PYTHON_EXE=%PORTABLE_PYTHON%"
+)
+
+if not defined PYTHON_EXE (
+  if exist "%APP_ROOT%python\python.exe" (
+    set "PYTHON_EXE=%APP_ROOT%python\python.exe"
+  )
 )
 
 if not defined PYTHON_EXE (
@@ -19,9 +27,24 @@ if not defined PYTHON_EXE (
   if not errorlevel 1 set "PYTHON_EXE=python"
 )
 
+if exist "%APP_ROOT%.vendor\site-packages" (
+  if defined PYTHONPATH (
+    set "PYTHONPATH=%APP_ROOT%.vendor\site-packages;%APP_ROOT%;%PYTHONPATH%"
+  ) else (
+    set "PYTHONPATH=%APP_ROOT%.vendor\site-packages;%APP_ROOT%"
+  )
+)
+
 if not defined PYTHON_EXE (
-  echo Не удалось найти Python для запуска локальной версии.
-  echo Установите Python или поправьте путь в файле run_local.bat.
+  echo Не удалось найти Python для запуска приложения.
+  echo.
+  echo Для запуска без установки Python:
+  echo 1. Соберите переносимую папку командой:
+  echo    powershell -ExecutionPolicy Bypass -File scripts\build_windows_portable.ps1
+  echo 2. Откройте готовую папку dist\Raschet_ZHKH_Windows_Portable
+  echo 3. Запустите из нее run_local.bat
+  echo.
+  echo Если Python уже установлен, добавьте его в PATH и повторите запуск.
   pause
   exit /b 1
 )
